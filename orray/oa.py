@@ -7,7 +7,7 @@ from typing import Sequence, overload, Literal
 from jaxtyping import Int8, Bool, Array
 
 
-class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[" num_cols"]]):
+class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
     """
     An abstract base class for all orthogonal array implementations.
 
@@ -20,7 +20,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[" num_cols"]]):
     num_levels: int = eqx.field(static=True)
     strength: int = eqx.field(static=True)
 
-    def __post_init__(self):
+    def __check_init__(self):
         """Initializes the static properties of the array."""
         if self.num_rows <= 0 or self.num_cols <= 0:
             raise ValueError("Dimensions must be positive.")
@@ -46,7 +46,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[" num_cols"]]):
     def __len__(self):
         return self.num_rows
 
-    def __getitem__(self, i):
+    def __getitem__(self, i) -> Int8[Array, " num_cols"]:
         return self._get_batch(batch_idx=i, batch_size=1)[0, ...]
 
     @abc.abstractmethod
@@ -204,13 +204,13 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[" num_cols"]]):
 
 
 class MaterializedOrthogonalArray(OrthogonalArray):
-    _oa: Int8["num_rows num_cols"]
+    _oa: Int8[Array, "num_rows num_cols"]
 
     def __init__(
         self,
         num_levels: int,
         strength: int,
-        orthogonal_array: Int8["num_rows num_cols"]
+        orthogonal_array: Int8[Array, "num_rows num_cols"]
     ):
         self.num_rows, self.num_cols = orthogonal_array.shape
         self.num_levels = num_levels
@@ -231,9 +231,8 @@ class MaterializedOrthogonalArray(OrthogonalArray):
         start = batch_idx * batch_size
 
         # don't truncate at num_rows since self._oa is already padded
-        end = start + batch_size
-
-        result = self._oa[start:end]
+        # result = self._oa[start:start + batch_size]
+        result = jax.lax.dynamic_slice_in_dim(self._oa, start, batch_size, axis=0)
         
         # Ensure result is on the specified device
         if device is not None:

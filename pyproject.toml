@@ -10,4 +10,5 @@ dependencies = [
 	"jax[cpu]",
 	"equinox",
 	"jaxtyping",
+	"pytest>=8.4.2",
 ]
