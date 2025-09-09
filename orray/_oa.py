@@ -251,9 +251,9 @@ class OABatchSequenceJax(AbstractOABatchSequence):
         # TODO: reprofile the construciton costs.
         if self.even_to_odd:
             #batch_size = int(batch_end_row // 2 - batch_start_row // 2)
-            batch_size = self.batch_size // 2
+            _batch_size = self.batch_size // 2
             unmodified_rows, _ = get_row_batch_of_trivial_mixed_level_oa(
-                i0=batch_start_row // 2, arities=self.arities, batch_size=batch_size
+                i0=batch_start_row // 2, arities=self.arities, batch_size=_batch_size
             )
             rows = jnp.repeat(unmodified_rows, repeats=2, axis=0)
         else:

@@ -41,17 +41,17 @@ def test_batches_invalid_sizes(small_oa: MaterializedOrthogonalArray):
 
 
 def test_batches_length_and_last_batch_shape(small_oa: MaterializedOrthogonalArray):
-	bs = 3
-	seq = small_oa.batches(bs)
-	expected_len = (small_oa.num_rows + bs - 1) // bs
+	batch_size = 3
+	seq = small_oa.batches(batch_size)
+	expected_len = (small_oa.num_rows + batch_size - 1) // batch_size
 	assert len(seq) == expected_len
 	# check last batch shape truncation in non-jit mode
 	last = seq[len(seq) - 1]
-	expected_last = small_oa.num_rows % bs or bs
+	expected_last = small_oa.num_rows % batch_size or batch_size
 	assert last.shape == (expected_last, small_oa.num_cols)
 
 	# jit mode should always be full batch_size with a mask
-	jseq = small_oa.batches(bs, jit_compatible=True)
+	jseq = small_oa.batches(batch_size, jit_compatible=True)
 	jb, jm = jseq[len(jseq) - 1]
-	assert jb.shape == (bs, small_oa.num_cols)
-	assert jm.shape == (bs,)
+	assert jb.shape == (batch_size, small_oa.num_cols)
+	assert jm.shape == (batch_size,)
