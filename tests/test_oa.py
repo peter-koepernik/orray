@@ -1,57 +1,68 @@
-import pytest
 import jax
 import jax.numpy as jnp
+import pytest
 
+from orray.constructions import generate_oa_bose_ray
 from orray.oa import MaterializedOrthogonalArray
+
 from .helpers import (
-	check_jit_compatible,
-	check_device_placement,
-	check_return_type,
-	check_exceptions,
+    _check_is_orthogonal_probablistic,
+    check_device_placement,
+    check_exceptions,
+    check_jit_compatible,
+    check_return_type,
 )
 
 
 @pytest.fixture
 def small_oa() -> MaterializedOrthogonalArray:
-	# 4x3 array with int8 dtype
-	arr = (jnp.arange(12, dtype=jnp.int8) % 3).reshape(4, 3)
-	return MaterializedOrthogonalArray(num_levels=3, strength=1, orthogonal_array=arr)
+    # 4x3 array with int8 dtype
+    arr = (jnp.arange(12, dtype=jnp.int8) % 3).reshape(4, 3)
+    return MaterializedOrthogonalArray(num_levels=3, strength=1, orthogonal_array=arr)
 
 
 def test_return_types_small_oa(small_oa: MaterializedOrthogonalArray):
-	check_return_type(small_oa, batch_size=2)
-	check_return_type(small_oa, batch_size=2, jit_compatible=True)
+    check_return_type(small_oa, batch_size=2)
+    check_return_type(small_oa, batch_size=2, jit_compatible=True)
 
 
 def test_jit_compat_small_oa(small_oa: MaterializedOrthogonalArray):
-	check_jit_compatible(small_oa, batch_size=2)
+    check_jit_compatible(small_oa, batch_size=2)
 
 
 def test_device_placement_small_oa(small_oa: MaterializedOrthogonalArray):
-	dev = jax.devices()[0]
-	check_device_placement(small_oa, batch_size=2, device=dev)
+    dev = jax.devices()[0]
+    check_device_placement(small_oa, batch_size=2, device=dev)
 
 
 def test_batches_invalid_sizes(small_oa: MaterializedOrthogonalArray):
-	# generic invalids
-	check_exceptions(small_oa)
-	# too large also errors
-	with pytest.raises(ValueError):
-		_ = small_oa.batches(small_oa.num_rows + 1)
+    # generic invalids
+    check_exceptions(small_oa)
+    # too large also errors
+    with pytest.raises(ValueError):
+        _ = small_oa.batches(small_oa.num_rows + 1)
 
 
 def test_batches_length_and_last_batch_shape(small_oa: MaterializedOrthogonalArray):
-	batch_size = 3
-	seq = small_oa.batches(batch_size)
-	expected_len = (small_oa.num_rows + batch_size - 1) // batch_size
-	assert len(seq) == expected_len
-	# check last batch shape truncation in non-jit mode
-	last = seq[len(seq) - 1]
-	expected_last = small_oa.num_rows % batch_size or batch_size
-	assert last.shape == (expected_last, small_oa.num_cols)
+    batch_size = 3
+    seq = small_oa.batches(batch_size)
+    expected_len = (small_oa.num_rows + batch_size - 1) // batch_size
+    assert len(seq) == expected_len
+    # check last batch shape truncation in non-jit mode
+    last = seq[len(seq) - 1]
+    expected_last = small_oa.num_rows % batch_size or batch_size
+    assert last.shape == (expected_last, small_oa.num_cols)
 
-	# jit mode should always be full batch_size with a mask
-	jseq = small_oa.batches(batch_size, jit_compatible=True)
-	jb, jm = jseq[len(jseq) - 1]
-	assert jb.shape == (batch_size, small_oa.num_cols)
-	assert jm.shape == (batch_size,)
+    # jit mode should always be full batch_size with a mask
+    jseq = small_oa.batches(batch_size, jit_compatible=True)
+    jb, jm = jseq[len(jseq) - 1]
+    assert jb.shape == (batch_size, small_oa.num_cols)
+    assert jm.shape == (batch_size,)
+
+
+@pytest.mark.parametrize("m", [2, 4])
+@pytest.mark.parametrize("strength", [2, 3, 4, 5])
+def test_binary_generate_oa(m: int, strength: int):
+    oa = generate_oa_bose_ray(m, strength)
+    rng = jax.random.PRNGKey(0)
+    _check_is_orthogonal_probablistic(rng, oa)

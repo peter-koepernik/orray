@@ -6,7 +6,7 @@ import equinox as eqx
 import operator
 from functools import partial, reduce
 from typing import Sequence, overload, Literal, Callable, Collection
-from jaxtyping import Int8, Bool, Array
+from jaxtyping import Int8, Bool, Array, Int, UInt8
 
 
 class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
@@ -108,7 +108,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
             start = i * batch_size
             end = min(start + batch_size, self.num_rows)
             generated_batch = self._get_batch(i, batch_size, device=device)
-            full_array[start:end] = generated_batch[: end - start]
+            full_array = full_array.at[start:end, :].set(generated_batch[: end - start, :])
         return full_array
 
     @overload
@@ -306,7 +306,7 @@ class LinearOrthogonalArray(OrthogonalArray):
         self.num_rows = 1
         for n_cols, q in arities:
             self.num_rows *= q**n_cols
-        if self.even_to_odd:
+        if self._even_to_odd:
             self.num_rows *= 2
 
         if self._post_linear_combination_processor is None:
@@ -386,7 +386,7 @@ class LinearOrthogonalArray(OrthogonalArray):
                 batch_size=batch_size,
                 device=device,
             )
-        OA = jnp.mod(rows @ _generator_matrix, self._mod)
+        OA = jnp.mod(rows @ self._generator_matrix, self._mod)
         if self._post_linear_combination_processor is not None:
             OA = self._post_linear_combination_processor(OA)
 
@@ -419,7 +419,7 @@ def get_row_batch_of_trivial_mixed_level_oa(
         if q == 2:
             ints = i0 + jnp.arange(batch_size, device=device)
             bits = jnp.arange(n, device=device)
-            _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits), 1)
+            _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits[None, :]), 1)
             update = _update.astype(jnp.int8)
             result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
             j += n

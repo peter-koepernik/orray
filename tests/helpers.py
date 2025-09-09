@@ -11,6 +11,7 @@ import numpy as np
 import random
 import jax
 import jax.numpy as jnp
+import pytest
 
 from jaxtyping import Int8, Array, Bool, Int64
 from functools import partial
@@ -62,10 +63,10 @@ def check_jit_compatible(
     def step(carry, i):
         batch, mask = seq[i]
         # consume both so they are not DCE'ed
-        s = jnp.sum(batch.astype(jnp.int32)) + jnp.sum(mask.astype(jnp.int32))
+        s = jnp.sum(batch.astype(jnp.int64)) + jnp.sum(mask.astype(jnp.int64))
         return carry + s, None
 
-    out, _ = jax.lax.scan(step, jnp.asarray(0, jnp.int32), jnp.arange(n))
+    out, _ = jax.lax.scan(step, jnp.asarray(0, dtype=jnp.int64), jnp.arange(n, dtype=jnp.int64))
     assert hasattr(out, "dtype"), "JIT run did not return a numeric value"
 
 
@@ -154,7 +155,7 @@ def sample_column_indices(
 ) -> Int8[Array, "batch_size k"]:
     """
     Returns an integer array of shape (batch_size, k). Each row is a uniformly random
-    k-subset of {1, ..., n}, sampled without replacement and optionally sorted ascending.
+    k-subset of {0, ..., n-1}, sampled without replacement and optionally sorted ascending.
 
     Args:
         rng: PRNGKey
@@ -164,7 +165,7 @@ def sample_column_indices(
         sort: whether to sort the rows
 
     Returns:
-        (batch_size, k) int8 array with rows i1 < ... < ik, values in {1, ..., n}.
+        (batch_size, k) int8 array with rows i1 < ... < ik, values in {0, ..., n-1}.
     """
     # Basic argument checks (executed at trace time since they are Python ints).
     if not (1 <= k <= n):
@@ -178,7 +179,7 @@ def sample_column_indices(
     _, idx = jax.lax.top_k(g, k)  # (batch_size, k), indices in descending Gumbel order
     if sort:
         idx = jnp.sort(idx, axis=1)  # sort to enforce i1 < ... < ik
-    return (idx + 1).astype(jnp.int8)  # shift to 1..n
+    return idx.astype(jnp.int8)
 
 
 @partial(jax.jit, static_argnames="num_levels")
@@ -194,9 +195,8 @@ def _check_all_rows_appear_equally_often(
             every one of the k**num_columns possible columns appears exactly
             num_rows / (k**num_columns) times in x[i, ...].
     """
+    jax.debug.print("x:\n{}", x)
     B, R, C = x.shape
-    assert jnp.all(x >= 0)
-    assert jnp.all(x < num_levels)
     Kp = num_levels**C  # number of possible columns
 
     # Quick impossibility check
@@ -229,16 +229,16 @@ def _check_set_of_columns(
     materialized_orthogonal_array: Int8[Array, "num_rows num_cols"],
     num_levels: int,
     strength: int,
-    indices: Int8[Array, "batch_size num_cols"],
+    indices: Int8[Array, "batch_size ..."],
 ):
     num_rows, num_cols = materialized_orthogonal_array.shape
     batch_size, _ = indices.shape
-    assert indices.shape == (batch_size, strength)
+    assert indices.shape[1] == min(strength, num_cols)
 
     # shape (num_rows, batch_size, strength)
     cols = materialized_orthogonal_array[:, indices]
     cols = jnp.permute_dims(cols, (1, 0, 2))
-    assert cols.shape == (batch_size, num_rows, strength)
+    assert cols.shape == (batch_size, num_rows, min(strength, num_cols))
 
     ok = _check_all_rows_appear_equally_often(cols, num_levels)
     assert jnp.all(ok)
@@ -261,9 +261,6 @@ def _check_is_orthogonal_probablistic(
         that we hit 1 every time is:
         (1-p)^N <= (1-eps)^N <= exp(-eps N) <!= 1-conf, so N >= - log(1-conf) / eps
     """
-
-    N = int(math.ceil(-math.log(1 - confidence) / epsilon))  # default: 231
-
     _oa = orthogonal_array.materialize()
 
     strength = orthogonal_array.strength
@@ -271,6 +268,13 @@ def _check_is_orthogonal_probablistic(
     num_rows = orthogonal_array.num_rows
     num_cols = orthogonal_array.num_cols
 
+    if strength >= num_cols:
+        # check full array
+        indices = jnp.arange(num_cols, dtype=jnp.int8)
+        _check_set_of_columns(_oa, num_levels, strength, indices[None, :])
+        return
+
+    N = int(math.ceil(-math.log(1 - confidence) / epsilon))  # default: 231
 
     assert strength >= 1
     assert num_levels >= 2
@@ -281,14 +285,4 @@ def _check_is_orthogonal_probablistic(
     indices = sample_column_indices(rng, num_cols, strength, batch_size=N)
     _check_set_of_columns(_oa, num_levels, strength, indices)
 
-    #marker_sample_random_ordered_pair(n_cols, strength)
-    #assert _check_set_of_columns(orthogonal_array, num_levels, strength, indices)
 
-
-# @pytest.mark.parametrize("num_cols", [16, 32, 64])
-# @pytest.mark.parametrize("strength", range(3, 8))
-# def test_binary_generate_oa(num_cols: int, strength: int):
-#    num_levels = 2
-#    oa_sequence = generate_oa(num_cols, num_levels, strength)
-#    oa = np.vstack(list(oa_sequence))
-#    _check_is_orthogonal_probablistic(oa, num_levels, strength)
