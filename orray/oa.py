@@ -6,10 +6,10 @@ import equinox as eqx
 import operator
 from functools import partial, reduce
 from typing import Sequence, overload, Literal, Callable, Collection
-from jaxtyping import Int8, Bool, Array, Int, UInt8
+from jaxtyping import Int32, Bool, Array
 
 
-class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
+class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int32[Array, " num_cols"]]):
     """
     An abstract base class for all orthogonal array implementations.
 
@@ -48,40 +48,70 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
     def __len__(self):
         return self.num_rows
 
-    def __getitem__(self, i) -> Int8[Array, " num_cols"]:
-        return self._get_batch(batch_idx=i, batch_size=1)[0, ...]
+    def __getitem__(self, i):
+        """Return a row or a contiguous slice of rows.
+
+        - x[i] returns the i-th row as shape (num_cols,).
+        - x[a:b] returns rows [a, b) as shape (b-a, num_cols)
+
+        Only contiguous slices (step=None or step==1) are supported.
+        """
+        # Single row
+        if isinstance(i, int):
+            i = i % self.num_rows
+            return self.get_batch(start=i, batch_size=1)[0, ...]
+
+        # Slice of rows
+        if isinstance(i, slice):
+            start, stop, step = i.indices(self.num_rows)
+            if step != 1:
+                raise NotImplementedError("Only contiguous slices with step=1 are supported.")
+            start = start % self.num_rows
+            stop = stop % self.num_rows
+            if stop <= start:
+                return jnp.zeros((0, self.num_cols), dtype=jnp.int32)
+
+            return self.get_batch(start=start, batch_size=stop-start)
+
+        raise TypeError(f"Invalid index type: {type(i)!r}. Expected int or slice.")
+
+    @partial(jax.jit, static_argnames=("batch_size", "device"))
+    def get_batch(
+        self, start: Int32[Array, ""], batch_size: int, device: jax.Device | None = None
+    ) -> Int32[Array, "batch_size num_cols"]:
+        return self._get_batch(start, batch_size, device)
 
     @abc.abstractmethod
     def _get_batch(
-        self, batch_idx: Int8[Array, ""], batch_size: int, device: jax.Device | None = None
-    ) -> Int8[Array, "batch_size num_cols"]:
+        self, start: Int32[Array, ""], batch_size: int, device: jax.Device | None = None
+    ) -> Int32[Array, "batch_size num_cols"]:
         """Get a batch of rows from the orthogonal array.
 
         Args:
-            batch_idx: The index of the batch to retrieve. Guaranteed to be in range [0, num_batches).
+            start: The index of first row of the batch to retrieve. Guaranteed to be in range [0, num_rows).
             batch_size: The number of rows to return. Guaranteed to be in [1, num_rows].
             device: Optional JAX device where the batch should be created. If provided,
                 the batch must be computed directly on this device to minimize data transfer.
 
         Returns:
-            A JAX int8 array with shape (batch_size, num_cols) containing the requested
+            A JAX int32 array with shape (batch_size, num_cols) containing the requested
             batch of orthogonal array rows.
 
         Notes:
-            - For batch_idx < num_batches - 1: Returns the corresponding rows of the
+            - For start < num_rows - batch_size - 1: Returns the corresponding rows of the
               orthogonal array
-            - For batch_idx == num_batches - 1: Returns the remaining rows. If fewer
-              than batch_size rows remain, pads to shape (batch_size, num_cols) with
-              arbitrary values.
+            - For start >= num_rows - batch_size - 1: Returns the remaining rows, padded
+              to shape (batch_size, num_cols) with arbitrary values.
             - When device is specified, the batch must be created directly on that
               device rather than computed elsewhere and transferred.
-            - Must be `jax.jit` compatible (with static `batch_size` and `device`, and traced `batch_idx`)
+            - Must be `jax.jit` compatible (with static `batch_size` and `device`, and traced `start`)
         """
         raise NotImplementedError
 
+    @partial(jax.jit, static_argnames="device")
     def materialize(
         self, device: jax.Device | None = None
-    ) -> Int8[Array, "num_rows num_cols"]:
+    ) -> Int32[Array, "num_rows num_cols"]:
         """Materializes the entire orthogonal array into a single jax array.
         Only use for small arrays!
 
@@ -92,9 +122,9 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
             MemoryError: If the orthogonal array is too large to fit into memory.
         """
         try:
-            full_array = jnp.empty(self.shape, dtype=jnp.int8, device=device)
+            full_array = jnp.empty(self.shape, dtype=jnp.int32, device=device)
         except MemoryError as e:
-            num_bytes_per_entry = 1  # int8 = 1 byte
+            num_bytes_per_entry = 4  # int32 = 4 bytes
             total_num_bytes = self.num_rows * self.num_cols * num_bytes_per_entry
             total_num_mib = total_num_bytes / (1024**2)
             raise MemoryError(
@@ -107,7 +137,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
         for i in range(num_batches):
             start = i * batch_size
             end = min(start + batch_size, self.num_rows)
-            generated_batch = self._get_batch(i, batch_size, device=device)
+            generated_batch = self.get_batch(start, batch_size, device=device)
             full_array = full_array.at[start:end, :].set(generated_batch[: end - start, :])
         return full_array
 
@@ -118,7 +148,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
         jit_compatible: Literal[False] = ...,
         *,
         device: jax.Device | None = ...,
-    ) -> Sequence[Int8[Array, "batch_size num_cols"]]: ...
+    ) -> Sequence[Int32[Array, "batch_size num_cols"]]: ...
 
     @overload
     def batches(
@@ -128,7 +158,7 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
         *,
         device: jax.Device | None = ...,
     ) -> Sequence[
-        tuple[Int8[Array, "batch_size num_cols"], Bool[Array, "batch_size"]]
+        tuple[Int32[Array, "batch_size num_cols"], Bool[Array, "batch_size"]]
     ]: ...
 
     def batches(
@@ -146,13 +176,16 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
         If `jit_compatible` is True, each item is a tuple (batch, mask) where `batch`
         has shape (batch_size, num_cols) and `mask` has shape (batch_size,) marking
         which rows are valid (always all True except potentially on the last batch);
-        this enables JIT-friendly static shapes.
+        this enables the user to consume the batches in a JIT context (e.g. `jax.lax.scan`)
 
         Args:
-            batch_size: Number of rows per batch (must be marked static in a JIT context!)
-                jit_compatible: Whether to return (batch, mask) with static shapes.
+            batch_size: Number of rows per batch (must be static in a JIT context)
+            jit_compatible: Whether to return (batch, mask) with static shapes.
                 Must be in [1, num_rows]
-            device: Optional target device on which to generate batches.
+            device: Optional target device on which to generate batches. However it's
+                more efficient to create the OrthogonalArray on that device in the first place
+                (e.g. through the `device` keyword in the construct method), and then either
+                leave this keyword as `None` or pass the same device again.
         """
         if batch_size <= 0:
             raise ValueError("batch_size must be positive but is {batch_size}.")
@@ -183,10 +216,11 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
             def __getitem__(self, i: int):
                 if self._jit:
                     i = jnp.mod(i, self._batch_size)
-                    valid_count = self._parent.num_rows - i * self._batch_size
-                    mask = jnp.arange(self._batch_size) < valid_count
+                    start = i * self._batch_size
+                    mask = start + jnp.arange(self._batch_size) < self._parent.num_rows
+                    # use unjitted version because we assume the user will jit over the top
                     batch = self._parent._get_batch(
-                        i, self._batch_size, device=self._device
+                        start, self._batch_size, device=self._device
                     )
                     return batch, mask
                 else:
@@ -195,8 +229,10 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int8[Array, " num_cols"]]):
                             f"Index {i} out of bounds [{-self._num_batches},{self._num_batches})"
                         )
                     i = i % self._num_batches
-                    batch = self._parent._get_batch(
-                        i, self._batch_size, device=self._device
+                    start = i * self._batch_size
+                    # use jitted version
+                    batch = self._parent.get_batch(
+                        start, self._batch_size, device=self._device
                     )
                     if i == len(self) - 1:
                         last_size = self._parent.num_rows % self._batch_size
@@ -212,20 +248,20 @@ class MaterializedOrthogonalArray(OrthogonalArray):
     orthogonal array in memory. Only works for small arrays.
     """
 
-    _oa: Int8[Array, "num_rows num_cols"]
+    _oa: Int32[Array, "num_rows num_cols"]
 
     def __init__(
         self,
         num_levels: int,
         strength: int,
-        orthogonal_array: Int8[Array, "num_rows num_cols"],
+        orthogonal_array: Int32[Array, "num_rows num_cols"],
     ):
         self.num_rows, self.num_cols = orthogonal_array.shape
         self.num_levels = num_levels
         self.strength = strength
 
-        # Ensure orthogonal_array has jnp.int8 type
-        orthogonal_array = jnp.asarray(orthogonal_array, dtype=jnp.int8)
+        # Ensure orthogonal_array has jnp.int32 type
+        orthogonal_array = jnp.asarray(orthogonal_array, dtype=jnp.int32)
 
         # this ensures that the final batch is correctly padded
         # regardless of the batch_size (which is <= num_rows)
@@ -234,10 +270,8 @@ class MaterializedOrthogonalArray(OrthogonalArray):
         )
 
     def _get_batch(
-        self, batch_idx: Int8[Array, ""], batch_size: int, device: jax.Device | None = None
-    ) -> Int8[Array, "batch_size num_cols"]:
-        start = batch_idx * batch_size
-
+        self, start: Int32[Array, ""], batch_size: int, device: jax.Device | None = None
+    ) -> Int32[Array, "batch_size num_cols"]:
         # don't truncate at num_rows since self._oa is already padded
         # result = self._oa[start:start + batch_size, :]
         result = jax.lax.dynamic_slice_in_dim(self._oa, start, batch_size, axis=0)
@@ -263,25 +297,25 @@ class LinearOrthogonalArray(OrthogonalArray):
 
     """
 
-    _generator_matrix: Int8[Array, "k num_cols"]
-    _arities: tuple[tuple[int, int], ...]
-    _mod: int
-    _even_to_odd: bool
+    _generator_matrix: Int32[Array, "k num_cols"]
+    _arities: tuple[tuple[int, int], ...] = eqx.field(static=True)
+    _mod: int = eqx.field(static=True)
+    _even_to_odd: bool = eqx.field(static=True)
     _post_linear_combination_processor: (
-        Callable[[Int8[Array, "num_rows num_cols1"]], Int8[Array, "num_rows num_cols2"]]
+        Callable[[Int32[Array, "num_rows num_cols1"]], Int32[Array, "num_rows num_cols2"]]
         | None
-    )
+    ) = eqx.field(static=True)
 
     def __init__(
         self,
-        generator_matrix: Int8[Array, "k num_cols"],
+        generator_matrix: Int32[Array, "k num_cols"],
         arities: Collection[tuple[int, int]],
         mod: int,
         num_levels: int,
         strength: int,  # for `even_to_odd`, this is the strength of the final construction, so odd
         binary_oa_even_to_odd_strength: bool = False,
         post_linear_combination_processor: Callable[
-            [Int8[Array, "num_rows num_cols1"]], Int8[Array, "num_rows num_cols2"]
+            [Int32[Array, "num_rows num_cols1"]], Int32[Array, "num_rows num_cols2"]
         ]
         | None = None,
     ):
@@ -320,96 +354,55 @@ class LinearOrthogonalArray(OrthogonalArray):
         if self._even_to_odd:
             self.num_cols += 1
 
-    def _get_batch_even_batch_size(
-        self, batch_idx: Int8[Array, ""], batch_size: int, device: jax.Device | None = None
-    ) -> Int8[Array, "batch_size num_cols"]:
-        if device is not None:
-            _generator_matrix = jax.device_put(self._generator_matrix, device)
-
-        batch_start_row = batch_idx * batch_size
-
-        valid = batch_start_row + jnp.arange(batch_size, device=device) < self.rows
-
-        if self._even_to_odd:
-            # batch_size = int(batch_end_row // 2 - batch_start_row // 2)
-            _batch_size = batch_size // 2
-            unmodified_rows = get_row_batch_of_trivial_mixed_level_oa(
-                i0=batch_start_row // 2,
-                arities=self._arities,
-                batch_size=_batch_size,
-                device=device,
-            )
-            rows = jnp.repeat(unmodified_rows, repeats=2, axis=0)
-        else:
-            rows = get_row_batch_of_trivial_mixed_level_oa(
-                i0=batch_start_row,
-                arities=self._arities,
-                batch_size=batch_size,
-                device=device,
-            )
-        OA = jnp.mod(rows @ _generator_matrix, self._mod)
-        if self._post_linear_combination_processor is not None:
-            OA = self._post_linear_combination_processor(OA)
-
-        if self._even_to_odd:
-            OA = jnp.concatenate(
-                (OA, jnp.zeros((batch_size, 1), dtype=jnp.int8)), axis=1
-            )
-            OA = OA.at[1::2, :].set(1 - OA[1::2, :])
-
-        return OA, valid
-
     def _get_batch(
-        self, batch_idx: Int8[Array, ""], batch_size: int, device: jax.Device | None = None
-    ) -> Int8[Array, "batch_size num_cols"]:
+        self, start: Int32[Array, ""], batch_size: int, device: jax.Device | None = None
+    ) -> Int32[Array, "batch_size num_cols"]:
         if device is not None:
             _generator_matrix = jax.device_put(self._generator_matrix, device)
-
-        batch_start_row = batch_idx * batch_size
 
         if self._even_to_odd:
             _batch_size = batch_size // 2 + 1
             unmodified_rows = get_row_batch_of_trivial_mixed_level_oa(
-                i0=batch_start_row // 2,
+                i0=start // 2,
                 arities=self._arities,
                 batch_size=_batch_size,
                 device=device,
             )
             rows = jnp.repeat(unmodified_rows, repeats=2, axis=0)
             rows = jax.lax.dynamic_slice_in_dim(
-                rows, batch_start_row % 2, batch_size, axis=0
+                rows, start % 2, batch_size, axis=0
             )
         else:
             rows = get_row_batch_of_trivial_mixed_level_oa(
-                i0=batch_start_row,
+                i0=start,
                 arities=self._arities,
                 batch_size=batch_size,
                 device=device,
             )
-        OA = jnp.mod(rows @ self._generator_matrix, self._mod)
+        batch = jnp.mod(rows @ self._generator_matrix, self._mod)
         if self._post_linear_combination_processor is not None:
-            OA = self._post_linear_combination_processor(OA)
+            batch = self._post_linear_combination_processor(batch)
 
         if self._even_to_odd:
-            OA = jnp.concatenate(
-                (OA, jnp.zeros((batch_size, 1), dtype=jnp.int8, device=device)), axis=1
+            batch = jnp.concatenate(
+                (batch, jnp.zeros((batch_size, 1), dtype=jnp.int32, device=device)), axis=1
             )
             idx = jnp.arange(batch_size, device=device)
-            flip_mask = jnp.bitwise_and(idx + batch_start_row, 1).astype(bool)
-            OA = jnp.where(flip_mask[:, None], 1 - OA, OA)
-        return OA
+            flip_mask = jnp.bitwise_and(idx + start, 1).astype(bool)
+            batch = jnp.where(flip_mask[:, None], 1 - batch, batch)
+        return batch
 
 
-# @partial(jax.jit, static_argnames=("arities", "batch_size"))
+#@partial(jax.jit, static_argnames=("arities", "batch_size", "device"))
 def get_row_batch_of_trivial_mixed_level_oa(
-    i0: Int8[Array, ""],
+    i0: Int32[Array, ""],
     arities: tuple[tuple[int, int], ...],
     batch_size: int,
     device: jax.Device | None = None,
-) -> Int8[Array, "batch_size num_cols"]:
+) -> Int32[Array, "batch_size num_cols"]:
     n_cols = sum(n for (n, _) in arities)
     n_rows = reduce(operator.mul, [pow(q, n) for (n, q) in arities])
-    result = jnp.zeros((batch_size, n_cols), dtype=jnp.int8, device=device)
+    result = jnp.zeros((batch_size, n_cols), dtype=jnp.int32, device=device)
 
     indices = i0 + jnp.arange(batch_size, device=device)
 
@@ -420,14 +413,14 @@ def get_row_batch_of_trivial_mixed_level_oa(
             ints = i0 + jnp.arange(batch_size, device=device)
             bits = jnp.arange(n, device=device)
             _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits[None, :]), 1)
-            update = _update.astype(jnp.int8)
+            update = _update.astype(jnp.int32)
             result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
             j += n
             continue
 
         for _ in range(n):
             period = period // q
-            update = jnp.astype(indices // period, jnp.int8)[..., None]
+            update = jnp.astype(indices // period, jnp.int32)[..., None]
             result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
             indices = indices % period
             j += 1
