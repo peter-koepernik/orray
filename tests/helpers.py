@@ -7,22 +7,24 @@ failure and return None on success. You can call them directly in tests.
 from __future__ import annotations
 
 import math
-import numpy as np
 import random
+from functools import partial
+
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
+from jaxtyping import Array, Bool, Int32, Int64
 
-from jaxtyping import Int8, Array, Bool, Int64
-from functools import partial
 from orray.oa import OrthogonalArray
 
 __all__ = [
-    "check_valid",
     "check_jit_compatible",
     "check_device_placement",
     "check_return_type",
     "check_exceptions",
+    "check_is_orthogonal",
+    "check_getitem"
 ]
 
 
@@ -48,6 +50,12 @@ def _devices_of(x) -> tuple[jax.Device, ...] | tuple[()]:
     return tuple()
 
 
+def check_getitem(oa: OrthogonalArray) -> None:
+    materialized_array = oa.materialize()
+    materialized_array_from_getitem = jnp.vstack([oa[i] for i in range(oa.num_rows)])
+    assert jnp.allclose(materialized_array, materialized_array_from_getitem)
+
+
 def check_jit_compatible(
     oa: OrthogonalArray, batch_size: int, *, device: jax.Device | None = None
 ) -> None:
@@ -66,7 +74,9 @@ def check_jit_compatible(
         s = jnp.sum(batch.astype(jnp.int64)) + jnp.sum(mask.astype(jnp.int64))
         return carry + s, None
 
-    out, _ = jax.lax.scan(step, jnp.asarray(0, dtype=jnp.int64), jnp.arange(n, dtype=jnp.int64))
+    out, _ = jax.lax.scan(
+        step, jnp.asarray(0, dtype=jnp.int64), jnp.arange(n, dtype=jnp.int64)
+    )
     assert hasattr(out, "dtype"), "JIT run did not return a numeric value"
 
 
@@ -96,14 +106,14 @@ def check_return_type(
 ) -> None:
     """Assert that `batches` yields the expected JAX types and shapes.
 
-    - Non-jit mode: returns a single JAX array with dtype int8 and shape (batch_size, num_cols) for batch 0.
-    - Jit mode: returns (batch, mask) where batch is int8 with shape (batch_size, num_cols) and mask is bool with shape (batch_size,).
+    - Non-jit mode: returns a single JAX array with dtype int32 and shape (batch_size, num_cols) for batch 0.
+    - Jit mode: returns (batch, mask) where batch is int32 with shape (batch_size, num_cols) and mask is bool with shape (batch_size,).
     """
     if not jit_compatible:
         seq = oa.batches(batch_size)
         x0 = seq[0]
         assert hasattr(x0, "dtype"), "Item is not an array-like with dtype"
-        assert x0.dtype == jnp.int8, f"Expected dtype int8, got {x0.dtype}"
+        assert x0.dtype == jnp.int32, f"Expected dtype int32, got {x0.dtype}"
         assert x0.shape == (batch_size, oa.num_cols), (
             f"Expected shape {(batch_size, oa.num_cols)}, got {x0.shape}"
         )
@@ -111,11 +121,11 @@ def check_return_type(
         seq = oa.batches(batch_size, jit_compatible=True)
         x0, m0 = seq[0]
         assert hasattr(x0, "dtype"), "Batch is not an array-like with dtype"
-        assert x0.dtype == jnp.int8, f"Expected dtype int8, got {x0.dtype}"
+        assert x0.dtype == jnp.int32, f"Expected dtype int32, got {x0.dtype}"
         assert x0.shape == (batch_size, oa.num_cols), (
             f"Expected shape {(batch_size, oa.num_cols)}, got {x0.shape}"
         )
-        # mask dtype may be bool or uint8 depending on implementation; accept truthy types but require correct shape
+        # mask dtype may be bool or uint32 depending on implementation; accept truthy types but require correct shape
         assert m0.shape == (batch_size,), (
             f"Expected mask shape {(batch_size,)}, got {m0.shape}"
         )
@@ -139,20 +149,10 @@ def check_exceptions(
             raise AssertionError(f"Expected ValueError for batch_size={bs}")
 
 
-def check_valid(oa: OrthogonalArray):
-    """tests that a given orthogonal array indeed satisfies
-    the defining property: in any `strength` number of columns,
-    all `pow(levels, strength)` number of possible rows appear
-    an even number of time
-    """
-    # implemented later
-    return True
-
-
 @partial(jax.jit, static_argnames=("n", "k", "batch_size", "sort"))
 def sample_column_indices(
     rng: jax.random.PRNGKey, n: int, k: int, batch_size: int, sort: bool = False
-) -> Int8[Array, "batch_size k"]:
+) -> Int32[Array, "batch_size k"]:
     """
     Returns an integer array of shape (batch_size, k). Each row is a uniformly random
     k-subset of {0, ..., n-1}, sampled without replacement and optionally sorted ascending.
@@ -165,7 +165,7 @@ def sample_column_indices(
         sort: whether to sort the rows
 
     Returns:
-        (batch_size, k) int8 array with rows i1 < ... < ik, values in {0, ..., n-1}.
+        (batch_size, k) int32 array with rows i1 < ... < ik, values in {0, ..., n-1}.
     """
     # Basic argument checks (executed at trace time since they are Python ints).
     if not (1 <= k <= n):
@@ -179,7 +179,7 @@ def sample_column_indices(
     _, idx = jax.lax.top_k(g, k)  # (batch_size, k), indices in descending Gumbel order
     if sort:
         idx = jnp.sort(idx, axis=1)  # sort to enforce i1 < ... < ik
-    return idx.astype(jnp.int8)
+    return idx.astype(jnp.int32)
 
 
 @partial(jax.jit, static_argnames="num_levels")
@@ -207,7 +207,9 @@ def _check_all_rows_appear_equally_often(
 
     # Encode each row (length C, values 0..k-1) as a base-k integer in [0, Kp-1]
     # weights = [k^(C-1), k^(C-2), ..., k^0]
-    weights = jnp.power(jnp.int64(num_levels), jnp.arange(C - 1, -1, -1, dtype=jnp.int64))
+    weights = jnp.power(
+        jnp.int64(num_levels), jnp.arange(C - 1, -1, -1, dtype=jnp.int64)
+    )
     x0 = x.astype(jnp.int64)
     # (B,R,C) @ (C,) -> (B,R)
     codes = jnp.tensordot(x0, weights, axes=([2], [0]))  # integer codes per row
@@ -225,11 +227,12 @@ def _check_all_rows_appear_equally_often(
     return ok
 
 
-def _check_set_of_columns(
-    materialized_orthogonal_array: Int8[Array, "num_rows num_cols"],
+@partial(jax.jit, static_argnames=["num_levels", "strength"])
+def _set_of_columns_is_valid(
+    materialized_orthogonal_array: Int32[Array, "num_rows num_cols"],
+    indices: Int32[Array, "batch_size ..."],
     num_levels: int,
     strength: int,
-    indices: Int8[Array, "batch_size ..."],
 ):
     num_rows, num_cols = materialized_orthogonal_array.shape
     batch_size, _ = indices.shape
@@ -241,9 +244,41 @@ def _check_set_of_columns(
     assert cols.shape == (batch_size, num_rows, min(strength, num_cols))
 
     ok = _check_all_rows_appear_equally_often(cols, num_levels)
-    assert jnp.all(ok)
+    return ok
 
-def _check_is_orthogonal_probablistic(
+
+@partial(jax.jit, static_argnames=["confidence", "epsilon"])
+def _is_orthogonal(
+    rng: jax.random.PRNGKey,
+    orthogonal_array: OrthogonalArray,
+    confidence: float = 0.99,
+    epsilon: float = 0.02,
+):
+    _oa = orthogonal_array.materialize()
+
+    strength = orthogonal_array.strength
+    num_levels = orthogonal_array.num_levels
+    num_rows = orthogonal_array.num_rows
+    num_cols = orthogonal_array.num_cols
+
+    if strength >= num_cols:
+        # check full array
+        indices = jnp.arange(num_cols, dtype=jnp.int32)
+        ok = _set_of_columns_is_valid(_oa, indices[None, :], num_levels, strength)
+        return _oa, ok
+
+    N = int(math.ceil(-math.log(1 - confidence) / epsilon))  # default: 231
+
+    assert strength >= 1
+    assert num_levels >= 2
+    assert _oa.shape == (num_rows, num_cols)
+
+    indices = sample_column_indices(rng, num_cols, strength, batch_size=N)
+    ok = _set_of_columns_is_valid(_oa, indices, num_levels, strength)
+    return _oa, ok
+
+
+def check_is_orthogonal(
     rng: jax.random.PRNGKey,
     orthogonal_array: OrthogonalArray,
     confidence: float = 0.99,
@@ -261,28 +296,11 @@ def _check_is_orthogonal_probablistic(
         that we hit 1 every time is:
         (1-p)^N <= (1-eps)^N <= exp(-eps N) <!= 1-conf, so N >= - log(1-conf) / eps
     """
-    _oa = orthogonal_array.materialize()
 
-    strength = orthogonal_array.strength
+    _oa, ok = _is_orthogonal(rng, orthogonal_array, confidence, epsilon)
+
     num_levels = orthogonal_array.num_levels
-    num_rows = orthogonal_array.num_rows
-    num_cols = orthogonal_array.num_cols
-
-    if strength >= num_cols:
-        # check full array
-        indices = jnp.arange(num_cols, dtype=jnp.int8)
-        _check_set_of_columns(_oa, num_levels, strength, indices[None, :])
-        return
-
-    N = int(math.ceil(-math.log(1 - confidence) / epsilon))  # default: 231
-
-    assert strength >= 1
-    assert num_levels >= 2
     assert jnp.all(_oa >= 0)
     assert jnp.all(_oa < num_levels)
-    assert _oa.shape == (num_rows, num_cols)
 
-    indices = sample_column_indices(rng, num_cols, strength, batch_size=N)
-    _check_set_of_columns(_oa, num_levels, strength, indices)
-
-
+    assert jnp.all(ok)
