@@ -3,13 +3,12 @@ import math
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-import operator
-from functools import partial, reduce
-from typing import Sequence, overload, Literal, Callable, Collection
+from functools import partial
+from typing import Sequence, overload, Literal, Callable, Collection, DTypeLike
 from jaxtyping import Int32, Bool, Array
 
 
-class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int32[Array, " num_cols"]]):
+class OrthogonalArray(eqx.Module, Sequence[Int32[Array, " num_cols"]]):
     """
     An abstract base class for all orthogonal array implementations.
 
@@ -42,8 +41,12 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int32[Array, " num_cols"]]):
         return self.num_cols
 
     @property
-    def shape(self) -> tuple[int, int]:
+    def shape(self) -> tuple[int, ...]:
         return (self.num_rows, self.num_cols)
+
+    @property
+    def dtype(self) -> DTypeLike:
+        return jnp.int32
 
     def __len__(self):
         return self.num_rows
@@ -137,7 +140,8 @@ class OrthogonalArray(eqx.Module, abc.ABC, Sequence[Int32[Array, " num_cols"]]):
         for i in range(num_batches):
             start = i * batch_size
             end = min(start + batch_size, self.num_rows)
-            generated_batch = self.get_batch(start, batch_size, device=device)
+            # use non-jitted version because we jit over the top
+            generated_batch = self._get_batch(start, batch_size, device=device)
             full_array = full_array.at[start:end, :].set(generated_batch[: end - start, :])
         return full_array
 
@@ -392,37 +396,3 @@ class LinearOrthogonalArray(OrthogonalArray):
             batch = jnp.where(flip_mask[:, None], 1 - batch, batch)
         return batch
 
-
-#@partial(jax.jit, static_argnames=("arities", "batch_size", "device"))
-def get_row_batch_of_trivial_mixed_level_oa(
-    i0: Int32[Array, ""],
-    arities: tuple[tuple[int, int], ...],
-    batch_size: int,
-    device: jax.Device | None = None,
-) -> Int32[Array, "batch_size num_cols"]:
-    n_cols = sum(n for (n, _) in arities)
-    n_rows = reduce(operator.mul, [pow(q, n) for (n, q) in arities])
-    result = jnp.zeros((batch_size, n_cols), dtype=jnp.int32, device=device)
-
-    indices = i0 + jnp.arange(batch_size, device=device)
-
-    j = jnp.asarray(0)  # col index
-    period = n_rows
-    for n, q in arities:
-        if q == 2:
-            ints = i0 + jnp.arange(batch_size, device=device)
-            bits = jnp.arange(n, device=device)
-            _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits[None, :]), 1)
-            update = _update.astype(jnp.int32)
-            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
-            j += n
-            continue
-
-        for _ in range(n):
-            period = period // q
-            update = jnp.astype(indices // period, jnp.int32)[..., None]
-            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
-            indices = indices % period
-            j += 1
-
-    return result

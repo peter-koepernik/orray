@@ -1,5 +1,6 @@
 import itertools
 import operator
+from functools import reduce
 
 import galois
 import jax
@@ -226,6 +227,7 @@ def construct_oa_kerdock(m: int, device: jax.Device | None = None):
     assert oa.shape == (4 ** (m + 1), 2 ** (m + 1))
     return oa
 
+
 def construct_oa_from_s_wise_linearly_independent_vectors(
     vecs: Int32[Array, "d n"], q: int, s: int, device: jax.Device | None = None
 ) -> LinearOrthogonalArray:
@@ -250,7 +252,9 @@ def construct_oa_from_s_wise_linearly_independent_vectors(
     return oa
 
 
-def construct_oa_strength1(num_levels: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_strength1(
+    num_levels: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Returns an orthogonal array of shape (num_levels, num_levels) of the form:
 
     [   0 ...   0 ]
@@ -270,7 +274,9 @@ def construct_oa_strength1(num_levels: int, device: jax.Device | None = None) ->
     return oa
 
 
-def construct_oa_strength2(m: int, q: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_strength2(
+    m: int, q: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Generates an OA(q^m, k, q, 2) where k = (q^m-1)/(q-1), which is provably optimal
     given the number of columns and the strength.
 
@@ -283,7 +289,9 @@ def construct_oa_strength2(m: int, q: int, device: jax.Device | None = None) -> 
     N = q**m
     k = (N - 1) // (q - 1)
     # the columns will be all m-element vectors over F_q whose first non-zero entry is 1
-    two_wise_linearly_independent_vectors = jnp.zeros((m, k), dtype=jnp.int32, device=device)
+    two_wise_linearly_independent_vectors = jnp.zeros(
+        (m, k), dtype=jnp.int32, device=device
+    )
 
     def fill(mat):
         d = mat.shape[0]
@@ -307,7 +315,9 @@ def construct_oa_strength2(m: int, q: int, device: jax.Device | None = None) -> 
     return oa
 
 
-def construct_oa_strength3(num_cols: int, num_levels: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_strength3(
+    num_cols: int, num_levels: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     if num_levels > 3:
         # AG construction, OA(q^(3m+1), q^(2m), 3, q)
         m = int(jnp.ceil(0.5 * jnp.log(num_cols) / jnp.log(num_levels)))
@@ -333,7 +343,9 @@ def construct_oa_strength3(num_cols: int, num_levels: int, device: jax.Device | 
     return construct_oa_q3_strength3_base5(m_base5, device=device)
 
 
-def construct_oa_strength3_base3(m: int, q: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_strength3_base3(
+    m: int, q: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Returns an OA(q^(3m+1), q^(2m), 3, q). This has N = k^(3/2), which is the best we
     have for strength 3 arrays *except* if q=2 or q=3."""
     assert galois.is_prime(q)
@@ -346,7 +358,9 @@ def construct_oa_strength3_base3(m: int, q: int, device: jax.Device | None = Non
     return oa
 
 
-def construct_oa_q3_strength3_base4(m: int = 1, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_q3_strength3_base4(
+    m: int = 1, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Constructs an OA(3^(4m+1), 20^m, 3, 3), which asymptotically has N = k^(1.466)
 
     Runtime: O(n log n) where n = output size.
@@ -383,7 +397,7 @@ def construct_oa_q3_strength3_base4(m: int = 1, device: jax.Device | None = None
             [2, 2, 1, 2],
         ],
         dtype=jnp.int32,
-        device=device
+        device=device,
     ).T
     # this is a cap set of size 20 in AG(4,3) (the largest possible)
     cap_set = jnp.hstack((vecs, jnp.mod(2 * vecs, 3)))
@@ -399,7 +413,9 @@ def construct_oa_q3_strength3_base4(m: int = 1, device: jax.Device | None = None
     return oa
 
 
-def construct_oa_q3_strength3_base5(m: int = 1, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_q3_strength3_base5(
+    m: int = 1, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Returns an OA(3^(5m+1), 45^m, 3, 3), which asymptotically has N = k^(1.443).
 
     Runtime: O(n log n) where n = output-size
@@ -494,7 +510,7 @@ def construct_oa_q3_strength3_base5(m: int = 1, device: jax.Device | None = None
             [2, 2, 1, 2, 0, 1],
         ],
         dtype=jnp.int32,
-        device=device
+        device=device,
     )
     nonzeros_by_column = jnp.sum((K != 0).astype(jnp.int32), axis=0)
     assert device is None or nonzeros_by_column.device == device
@@ -527,7 +543,9 @@ def construct_oa_q3_strength3_base5(m: int = 1, device: jax.Device | None = None
     return oa
 
 
-def construct_trivial_oa(n_cols: int, q: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_trivial_oa(
+    n_cols: int, q: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """returns the trivial OA with q^n_cols rows"""
     return LinearOrthogonalArray(
         generator_matrix=jnp.eye(n_cols, dtype=jnp.int32, device=device),
@@ -563,7 +581,9 @@ def construct_oa_from_generalised_cap_set(
     return oa
 
 
-def construct_oa_q3_strength4(m: int, device: jax.Device | None = None) -> LinearOrthogonalArray:
+def construct_oa_q3_strength4(
+    m: int, device: jax.Device | None = None
+) -> LinearOrthogonalArray:
     """Constructs an OA(3^(2m+1), 3^m, 3, 4) (i.e. ternary of strength 4), which has N = 3k^2
 
     For the construction, see section 3.1 in
@@ -588,7 +608,9 @@ def construct_oa_q3_strength4(m: int, device: jax.Device | None = None) -> Linea
     cap_set = jnp.zeros((N, 2 * m), dtype=jnp.int32, device=device)
     for x in range(3**m):
         x_gf = gf(x)
-        cap_set = cap_set.at[x, :m].set(jnp.asarray(x_gf.vector(), dtype=jnp.int32, device=device))
+        cap_set = cap_set.at[x, :m].set(
+            jnp.asarray(x_gf.vector(), dtype=jnp.int32, device=device)
+        )
         cap_set = cap_set.at[x, m:].set(
             jnp.asarray((x_gf * x_gf).vector(), dtype=jnp.int32, device=device)
         )
@@ -597,7 +619,43 @@ def construct_oa_q3_strength4(m: int, device: jax.Device | None = None) -> Linea
     return oa
 
 
-### Helpers
+def get_row_batch_of_trivial_mixed_level_oa(
+    i0: Int32[Array, ""],
+    arities: tuple[tuple[int, int], ...],
+    batch_size: int,
+    device: jax.Device | None = None,
+) -> Int32[Array, "batch_size num_cols"]:
+    n_cols = sum(n for (n, _) in arities)
+    n_rows = reduce(operator.mul, [pow(q, n) for (n, q) in arities])
+    result = jnp.zeros((batch_size, n_cols), dtype=jnp.int32, device=device)
+
+    indices = i0 + jnp.arange(batch_size, device=device)
+
+    j = jnp.asarray(0)  # col index
+    period = n_rows
+    for n, q in arities:
+        if q == 2:
+            ints = i0 + jnp.arange(batch_size, device=device)
+            bits = jnp.arange(n, device=device)
+            _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits[None, :]), 1)
+            update = _update.astype(jnp.int32)
+            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
+            j += n
+            continue
+
+        for _ in range(n):
+            period = period // q
+            update = jnp.astype(indices // period, jnp.int32)[..., None]
+            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
+            indices = indices % period
+            j += 1
+
+    return result
+
+
+###################################################
+#                     Helpers                     #
+###################################################
 
 
 def _generate_2t_wise_linearly_independent_vectors(
@@ -757,7 +815,9 @@ def _get_h_polynomial(m: int, device: jax.Device | None = None):
     return h
 
 
-def _get_h_polynomial_from_primitive_F2(primitive: Int32[Array, " n"], device: jax.Device | None = None):
+def _get_h_polynomial_from_primitive_F2(
+    primitive: Int32[Array, " n"], device: jax.Device | None = None
+):
     """Takes a primitive polynomial over F_2 of some odd degree m and turns it into a
     monic primitive basic irreducible polynomial over Z_4, using Graeffe's method.
     See e.g. section III.A of
@@ -825,11 +885,17 @@ def _construct_cap_set(q: int, m: int, device: jax.Device | None = None):
     """
     assert galois.is_prime(q)
     assert m >= 1
-    f = jnp.asarray(galois.primitive_poly(q, degree=2).coefficients(), dtype=jnp.int32, device=device)
+    f = jnp.asarray(
+        galois.primitive_poly(q, degree=2).coefficients(),
+        dtype=jnp.int32,
+        device=device,
+    )
     if f[1] == 0:
         # make sure the term for x is non-zero
         f = jnp.asarray(
-            galois.primitive_poly(q, degree=2, terms=3).coefficients(), dtype=jnp.int32, device=device
+            galois.primitive_poly(q, degree=2, terms=3).coefficients(),
+            dtype=jnp.int32,
+            device=device,
         )
     if f[1] != 1:
         gf = galois.GF(q)
