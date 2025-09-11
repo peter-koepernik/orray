@@ -24,7 +24,8 @@ __all__ = [
     "check_return_type",
     "check_exceptions",
     "check_is_orthogonal",
-    "check_getitem"
+    "check_getitem",
+    "check_randomise",
 ]
 
 
@@ -59,14 +60,14 @@ def check_getitem(oa: OrthogonalArray) -> None:
     from_slice = oa[start:stop]
     from_rows = jnp.vstack([oa[i] for i in range(start, stop)])
 
-    assert from_slice.shape == (stop-start, oa.factors), f"oa[{start}:{stop}].shape = {from_slice.shape} != {(stop-start, oa.factors)}"
-    assert from_rows.shape == (stop-start, oa.factors)
+    assert from_slice.shape == (stop - start, oa.factors), (
+        f"oa[{start}:{stop}].shape = {from_slice.shape} != {(stop - start, oa.factors)}"
+    )
+    assert from_rows.shape == (stop - start, oa.factors)
     assert jnp.allclose(from_slice, from_rows)
 
 
-def check_jit_compatible(
-    oa: OrthogonalArray, batch_size: int
-) -> None:
+def check_jit_compatible(oa: OrthogonalArray, batch_size: int) -> None:
     """Assert that `batches(jit_compatible=True)` is jax.jit-compatible with traced indices.
 
     Builds a sequence via `oa.batches(batch_size, jit_compatible=True, device=...)`
@@ -108,6 +109,32 @@ def check_device_placement(
     bi, mi = seq[len(seq) - 1]
     di = _devices_of(bi)
     assert di and device in di, f"Last batch not on device {device}; got {di}"
+
+
+def check_randomise(oa: OrthogonalArray):
+    _oa = oa.materialize()
+
+    original_rng = oa.randomisation_rng
+    if original_rng is not None:
+        original_offset = jax.random.randint(
+            original_rng, (1, oa.num_cols), 0, oa.num_levels, dtype=jnp.uint8
+        )
+    else:
+        original_offset = jnp.zeros((1, oa.num_cols), dtype=jnp.uint8)
+
+    rng = jax.random.PRNGKey(2025)
+
+    randomised_oa = oa.randomise(rng)
+    _randomised_oa = randomised_oa.materialize()
+
+    offset = jax.random.randint(
+        rng, (1, oa.num_cols), 0, oa.num_levels, dtype=jnp.uint8
+    )
+
+    assert jnp.array_equal(
+        jnp.mod(_randomised_oa + original_offset, oa.num_levels),
+        jnp.mod(_oa + offset, oa.num_levels),
+    )
 
 
 def check_return_type(

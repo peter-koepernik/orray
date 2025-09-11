@@ -9,9 +9,13 @@ from .helpers import (
     check_exceptions,
     check_jit_compatible,
     check_return_type,
-	check_getitem
+	check_getitem,
+	check_randomise
 )
 
+
+def test_randomise(oa: OrthogonalArray):
+	check_randomise(oa)
 
 def test_is_orthogonal(oa: OrthogonalArray):
 	rng = jax.random.PRNGKey(0)
@@ -24,12 +28,14 @@ def test_return_type(oa: OrthogonalArray):
 
 
 def test_jit_compatible(oa: OrthogonalArray):
-    check_jit_compatible(oa, batch_size=2)
+	batch_size = min(len(oa), 128)
+	check_jit_compatible(oa, batch_size=batch_size)
 
 
 def test_device_placement(oa: OrthogonalArray):
     dev = jax.devices()[0]
     check_device_placement(oa, batch_size=2, device=dev)
+
 
 
 def test_batches_invalid_sizes(oa: OrthogonalArray):

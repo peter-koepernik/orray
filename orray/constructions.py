@@ -1,6 +1,7 @@
 import itertools
 import operator
 from functools import reduce
+from typing import Optional
 
 import galois
 import jax
@@ -10,7 +11,12 @@ from jaxtyping import Array, UInt8
 from orray.oa import LinearOrthogonalArray
 
 
-def construct_oa_bose_ray(m: int, strength: int, device: jax.Device | None = None):
+def construct_oa_bose_ray(
+    m: int,
+    strength: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
+):
     """
     If `s=2u` is even: generates an OA(2^(mu), 2^m-1, 2, s), so N = (k+1)^(s/2)
     If `s=2u+1` is odd: generates an OA(2^(mu+1), 2^m, 2, s), so N = 2 k^floor(s/2)
@@ -48,7 +54,8 @@ def construct_oa_bose_ray(m: int, strength: int, device: jax.Device | None = Non
         num_levels=2,
         strength=strength,
         binary_oa_even_to_odd_strength=(strength % 2 == 1),
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     if strength % 2 == 1:
         assert oa.shape == (2 ** (m * t + 1), 2**m)
@@ -58,7 +65,11 @@ def construct_oa_bose_ray(m: int, strength: int, device: jax.Device | None = Non
 
 
 def construct_oa_vandermonde(
-    q: int, m: int, strength: int, device: jax.Device | None = None
+    q: int,
+    m: int,
+    strength: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ):
     """Returns an OA(q^(m*strength), q^m, q, strength) for a prime number q
 
@@ -98,13 +109,18 @@ def construct_oa_vandermonde(
         mod=q,
         num_levels=q,
         strength=strength,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (q ** (m * strength), q**m)
     return oa
 
 
-def construct_oa_delsarte_goethals(m: int, device: jax.Device | None = None):
+def construct_oa_delsarte_goethals(
+    m: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
+):
     """Generates an OA(2^(3m-1), 2^m, 2, 7), i.e. a binary 8^m/2 x 2^m array of
     strength 7, where m >= 4 is an even integer.  Based on the linear construction of
     the Delsarte-Goethals code (reference below).
@@ -166,13 +182,18 @@ def construct_oa_delsarte_goethals(m: int, device: jax.Device | None = None):
         num_levels=2,
         strength=7,
         post_linear_combination_processor=_gray_map,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (2 ** (3 * (m + 1) - 1), 2 ** (m + 1))
     return oa
 
 
-def construct_oa_kerdock(m: int, device: jax.Device | None = None):
+def construct_oa_kerdock(
+    m: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
+):
     """Generates an OA(4^m, 2^m, 2, 5), i.e. a (non-linear) binary 4^m x 2^m array of
     strength 5, where m >= 4 is an even integer. Based on the linear construction of the
     Kerdock code (reference below).
@@ -226,14 +247,19 @@ def construct_oa_kerdock(m: int, device: jax.Device | None = None):
         num_levels=2,
         strength=5,
         post_linear_combination_processor=_gray_map,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (4 ** (m + 1), 2 ** (m + 1))
     return oa
 
 
 def construct_oa_from_s_wise_linearly_independent_vectors(
-    vecs: UInt8[Array, "d n"], q: int, s: int, device: jax.Device | None = None
+    vecs: UInt8[Array, "d n"],
+    q: int,
+    s: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """
     Takes a matrix of shape say (d, n) such that its columns are s-wise linearly
@@ -251,14 +277,17 @@ def construct_oa_from_s_wise_linearly_independent_vectors(
         mod=q,
         num_levels=q,
         strength=s,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (q**d, n)
     return oa
 
 
 def construct_oa_strength1(
-    num_levels: int, device: jax.Device | None = None
+    num_levels: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Returns an orthogonal array of shape (num_levels, num_levels) of the form:
 
@@ -274,14 +303,18 @@ def construct_oa_strength1(
         mod=num_levels,
         num_levels=num_levels,
         strength=1,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (num_levels, num_levels)
     return oa
 
 
 def construct_oa_strength2(
-    m: int, q: int, device: jax.Device | None = None
+    m: int,
+    q: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Generates an OA(q^m, k, q, 2) where k = (q^m-1)/(q-1), which is provably optimal
     given the number of columns and the strength.
@@ -305,9 +338,7 @@ def construct_oa_strength2(
         mat = mat.at[0, : q ** (d - 1)].set(1)
 
         if d > 1:
-            submatrix = construct_trivial_oa(d - 1, q, device=device)
-            print(submatrix)
-            submatrix = submatrix.materialize().T
+            submatrix = construct_trivial_oa(d - 1, q, device=device).materialize().T
             mat = mat.at[1:, : q ** (d - 1)].set(submatrix)
 
             mat = mat.at[1:, q ** (d - 1) :].set(fill(mat[1:, q ** (d - 1) :]))
@@ -317,14 +348,21 @@ def construct_oa_strength2(
     assert two_wise_linearly_independent_vectors[-1, -1] == 1
     assert device is None or two_wise_linearly_independent_vectors.device == device
     oa = construct_oa_from_s_wise_linearly_independent_vectors(
-        two_wise_linearly_independent_vectors, q, 2
+        two_wise_linearly_independent_vectors,
+        q,
+        2,
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (N, k), f"expected shape {(N, k)} but got {oa.shape}"
     return oa
 
 
 def construct_oa_strength3(
-    num_cols: int, num_levels: int, device: jax.Device | None = None
+    num_cols: int,
+    num_levels: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     if num_levels > 3:
         # AG construction, OA(q^(3m+1), q^(2m), 3, q)
@@ -332,7 +370,9 @@ def construct_oa_strength3(
         assert (
             num_levels ** (2 * m) >= num_cols and num_levels ** (2 * (m - 1)) < num_cols
         )
-        return construct_oa_strength3_base3(m, num_levels, device=device)
+        return construct_oa_strength3_base3(
+            m, num_levels, device=device, randomisation_rng=randomisation_rng
+        )
 
     # strength 3, and 3 num_levels -> cap set constructions
     # base 3: OA(3^(3m+1),  9^m, 3, 3)
@@ -343,16 +383,25 @@ def construct_oa_strength3(
     m_base5 = int(jnp.ceil(jnp.log(num_cols) / jnp.log(45)))
     if 3 * m_base3 < 4 * m_base4 and 3 * m_base3 < 5 * m_base5:
         # base 3 has smallest number of rows
-        return construct_oa_strength3_base3(m_base3, 3, device=device)
+        return construct_oa_strength3_base3(
+            m_base3, 3, device=device, randomisation_rng=randomisation_rng
+        )
     elif 4 * m_base4 < 5 * m_base5:
         # base 4 has smallest number of rows
-        return construct_oa_q3_strength3_base4(m_base4, device=device)
+        return construct_oa_q3_strength3_base4(
+            m_base4, device=device, randomisation_rng=randomisation_rng
+        )
     # base 5 has smallest number of rows
-    return construct_oa_q3_strength3_base5(m_base5, device=device)
+    return construct_oa_q3_strength3_base5(
+        m_base5, device=device, randomisation_rng=randomisation_rng
+    )
 
 
 def construct_oa_strength3_base3(
-    m: int, q: int, device: jax.Device | None = None
+    m: int,
+    q: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Returns an OA(q^(3m+1), q^(2m), 3, q). This has N = k^(3/2), which is the best we
     have for strength 3 arrays *except* if q=2 or q=3."""
@@ -360,14 +409,18 @@ def construct_oa_strength3_base3(
     assert m >= 1
     cap_set = _construct_cap_set(q, m, device=device)
     assert device is None or cap_set.device == device
-    oa = construct_oa_from_generalised_cap_set(cap_set, q, s=3, device=device)
+    oa = construct_oa_from_generalised_cap_set(
+        cap_set, q, s=3, device=device, randomisation_rng=randomisation_rng
+    )
     # assert oa.runs == q ** (3 * m + 1)
     assert oa.shape == (q ** (3 * m + 1), q ** (2 * m))
     return oa
 
 
 def construct_oa_q3_strength3_base4(
-    m: int = 1, device: jax.Device | None = None
+    m: int = 1,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Constructs an OA(3^(4m+1), 20^m, 3, 3), which asymptotically has N = k^(1.466)
 
@@ -415,14 +468,18 @@ def construct_oa_q3_strength3_base4(
     cap_set = repeat_vectors(cap_set, m)
     assert cap_set.shape == (4 * m, 20**m)
     assert device is None or cap_set.device == device
-    oa = construct_oa_from_generalised_cap_set(cap_set, q=3, s=3, device=device)
+    oa = construct_oa_from_generalised_cap_set(
+        cap_set, q=3, s=3, device=device, randomisation_rng=randomisation_rng
+    )
     assert oa.num_rows == 3 ** (4 * m + 1)
     assert oa.shape == (3 ** (4 * m + 1), 20**m)
     return oa
 
 
 def construct_oa_q3_strength3_base5(
-    m: int = 1, device: jax.Device | None = None
+    m: int = 1,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Returns an OA(3^(5m+1), 45^m, 3, 3), which asymptotically has N = k^(1.443).
 
@@ -545,14 +602,19 @@ def construct_oa_q3_strength3_base5(
     # cap set of size 45^m in AG(5m,3)
     cap_set = repeat_vectors(cap_set, m)
     assert device is None or cap_set.device == device
-    oa = construct_oa_from_generalised_cap_set(cap_set, q=3, s=3, device=device)
+    oa = construct_oa_from_generalised_cap_set(
+        cap_set, q=3, s=3, device=device, randomisation_rng=randomisation_rng
+    )
     assert oa.num_rows == 3 ** (5 * m + 1)
     assert oa.shape == (3 ** (5 * m + 1), 45**m)
     return oa
 
 
 def construct_trivial_oa(
-    n_cols: int, q: int, device: jax.Device | None = None
+    n_cols: int,
+    q: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """returns the trivial OA with q^n_cols rows"""
     return LinearOrthogonalArray(
@@ -561,12 +623,17 @@ def construct_trivial_oa(
         mod=q,
         num_levels=q,
         strength=n_cols,
-        device=device
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
 
 
 def construct_oa_from_generalised_cap_set(
-    cap_set: UInt8[Array, "d k"], q: int, s: int, device: jax.Device | None = None
+    cap_set: UInt8[Array, "d k"],
+    q: int,
+    s: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Takes a set of k, d-dimensional vectors in F_q (q prime), and returns a matrix
     which, assuming the given vectors are s-wise affinely independent
@@ -584,14 +651,20 @@ def construct_oa_from_generalised_cap_set(
     )
 
     oa = construct_oa_from_s_wise_linearly_independent_vectors(
-        s_wise_linearly_independent_vectors, q, s, device=device
+        s_wise_linearly_independent_vectors,
+        q,
+        s,
+        device=device,
+        randomisation_rng=randomisation_rng,
     )
     assert oa.shape == (q ** (d + 1), k)
     return oa
 
 
 def construct_oa_q3_strength4(
-    m: int, device: jax.Device | None = None
+    m: int,
+    device: jax.Device | None = None,
+    randomisation_rng: Optional[jax.random.PRNGKey] = None,
 ) -> LinearOrthogonalArray:
     """Constructs an OA(3^(2m+1), 3^m, 3, 4) (i.e. ternary of strength 4), which has N = 3k^2
 
@@ -623,7 +696,9 @@ def construct_oa_q3_strength4(
         cap_set = cap_set.at[x, m:].set(
             jnp.asarray((x_gf * x_gf).vector(), dtype=jnp.uint8, device=device)
         )
-    oa = construct_oa_from_generalised_cap_set(cap_set.T, q=3, s=4, device=device)
+    oa = construct_oa_from_generalised_cap_set(
+        cap_set.T, q=3, s=4, device=device, randomisation_rng=randomisation_rng
+    )
     assert oa.shape == (3 ** (2 * m + 1), 3**m)
     return oa
 

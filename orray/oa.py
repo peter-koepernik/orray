@@ -1,8 +1,9 @@
 import abc
 import math
 import operator
-from functools import partial, reduce
+from functools import partial, reduce, cached_property
 from typing import Callable, Collection, Literal, Sequence, overload, Optional
+from dataclasses import replace
 
 import equinox as eqx
 import jax
@@ -22,10 +23,14 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
     num_cols: int = eqx.field(static=True)
     num_levels: int = eqx.field(static=True)
     strength: int = eqx.field(static=True)
-
     device: jax.Device = eqx.field(static=True)
-    # randomisation_rng: Optional[jax.random.PRNGKey] = None
-    
+
+    """
+    an orthogonal array remains valid if an arbitrary (e.g. random)
+    value is added to each column (modulo num_levels).
+    """
+    randomisation_rng: Optional[jax.random.PRNGKey]
+    _row_offset: UInt8[Array, " 1 num_cols"]
 
     def __check_init__(self):
         """Initializes the static properties of the array."""
@@ -53,20 +58,15 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
     @property
     def dtype(self) -> DTypeLike:
         return jnp.uint8
-    
-    # @property
-    # def _row_offset(self) -> UInt8[Array, " 1 num_cols"]:
-    #     """an orthogonal array's strength remains unchanged
-    #     if an arbitrary value is added to each column
-    #     (modulo num_levels), e.g. random.
-    #     """
-    #     if self.randomisation_rng is None:
-    #         return jnp.zeros((1, self.num_cols), dtype=jnp.uint8)
 
+    @abc.abstractmethod
+    def randomise(self, rng: jax.random.PRNGKey) -> "OrthogonalArray":
+        """Return a new module with given randomisation_rng."""
+        raise NotImplementedError
 
     @abc.abstractmethod
     def to_device(self, device: jax.Device) -> "OrthogonalArray":
-        """Return a new module placed on the given device (functional update)."""
+        """Return a new module placed on the given device."""
         raise NotImplementedError
 
     def __len__(self):
@@ -229,9 +229,7 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
                     start = i * self._batch_size
                     mask = start + jnp.arange(self._batch_size) < self._parent.num_rows
                     # use unjitted version because we assume the user will jit over the top
-                    batch = self._parent._get_batch(
-                        start, self._batch_size
-                    )
+                    batch = self._parent._get_batch(start, self._batch_size)
                     return batch, mask
                 else:
                     if i < -self._num_batches or i >= self._num_batches:
@@ -241,9 +239,7 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
                     i = i % self._num_batches
                     start = i * self._batch_size
                     # use jitted version
-                    batch = self._parent.get_batch(
-                        start, self._batch_size
-                    )
+                    batch = self._parent.get_batch(start, self._batch_size)
                     if i == len(self) - 1:
                         last_size = self._parent.num_rows % self._batch_size
                         if last_size > 0:
@@ -265,7 +261,8 @@ class MaterializedOrthogonalArray(OrthogonalArray):
         num_levels: int,
         strength: int,
         orthogonal_array: UInt8[Array, "num_rows num_cols"],
-        device: jax.Device | None = None
+        device: jax.Device | None = None,
+        randomisation_rng: Optional[jax.random.PRNGKey] = None,
     ):
         self.num_rows, self.num_cols = orthogonal_array.shape
         self.num_levels = num_levels
@@ -286,15 +283,31 @@ class MaterializedOrthogonalArray(OrthogonalArray):
             self._oa = jax.device_put(self._oa, device)
             self.device = device
 
+        self.randomisation_rng = jax.device_put(randomisation_rng, self.device)
+        self._row_offset = _get_row_offset(
+            self.randomisation_rng, self.num_cols, self.num_levels, self.device
+        )
+
     def to_device(self, device: jax.Device) -> "MaterializedOrthogonalArray":
-        # Recreate via constructor to avoid mutating and to handle static fields safely.
         # Slice off padding to pass the exact OA shape expected by __init__.
-        base_oa = jax.device_put(self._oa[0:self.num_rows, :], device)
+        base_oa = jax.device_put(self._oa[0 : self.num_rows, :], device)
         return MaterializedOrthogonalArray(
             num_levels=self.num_levels,
             strength=self.strength,
             orthogonal_array=base_oa,
             device=device,
+            randomisation_rng=self.randomisation_rng,
+        )
+
+    def randomise(self, rng: jax.random.PRNGKey) -> "MaterializedOrthogonalArray":
+        # Slice off padding to pass the exact OA shape expected by __init__.
+        base_oa = self._oa[0 : self.num_rows, :]
+        return MaterializedOrthogonalArray(
+            num_levels=self.num_levels,
+            strength=self.strength,
+            orthogonal_array=base_oa,
+            device=self.device,
+            randomisation_rng=rng,
         )
 
     def _get_batch(
@@ -303,6 +316,7 @@ class MaterializedOrthogonalArray(OrthogonalArray):
         # don't truncate at num_rows since self._oa is already padded
         # result = self._oa[start:start + batch_size, :]
         result = jax.lax.dynamic_slice_in_dim(self._oa, start, batch_size, axis=0)
+        result = jnp.mod(result + self._row_offset, self.num_levels)
 
         return result
 
@@ -344,7 +358,8 @@ class LinearOrthogonalArray(OrthogonalArray):
             [UInt8[Array, "num_rows num_cols1"]], UInt8[Array, "num_rows num_cols2"]
         ]
         | None = None,
-        device: jax.Device | None = None
+        device: jax.Device | None = None,
+        randomisation_rng: Optional[jax.random.PRNGKey] = None,
     ):
         self.num_levels = num_levels
         self.strength = strength
@@ -388,6 +403,11 @@ class LinearOrthogonalArray(OrthogonalArray):
         if self._even_to_odd:
             self.num_cols += 1
 
+        self.randomisation_rng = jax.device_put(randomisation_rng, self.device)
+        self._row_offset = _get_row_offset(
+            self.randomisation_rng, self.num_cols, self.num_levels, self.device
+        )
+
     def to_device(self, device: jax.Device) -> "LinearOrthogonalArray":
         return LinearOrthogonalArray(
             generator_matrix=jax.device_put(self._generator_matrix, device),
@@ -398,12 +418,25 @@ class LinearOrthogonalArray(OrthogonalArray):
             binary_oa_even_to_odd_strength=self._even_to_odd,
             post_linear_combination_processor=self._post_linear_combination_processor,
             device=device,
+            randomisation_rng=self.randomisation_rng,
+        )
+
+    def randomise(self, rng: jax.random.PRNGKey) -> "LinearOrthogonalArray":
+        return LinearOrthogonalArray(
+            generator_matrix=self._generator_matrix,
+            arities=self._arities,
+            mod=self._mod,
+            num_levels=self.num_levels,
+            strength=self.strength,
+            binary_oa_even_to_odd_strength=self._even_to_odd,
+            post_linear_combination_processor=self._post_linear_combination_processor,
+            device=self.device,
+            randomisation_rng=rng,
         )
 
     def _get_batch(
         self, start: Int[Array, ""], batch_size: int
     ) -> UInt8[Array, "batch_size num_cols"]:
-
         if self._even_to_odd:
             _batch_size = batch_size // 2 + 1
             unmodified_rows = get_row_batch_of_trivial_mixed_level_oa(
@@ -427,12 +460,17 @@ class LinearOrthogonalArray(OrthogonalArray):
 
         if self._even_to_odd:
             batch = jnp.concatenate(
-                (batch, jnp.zeros((batch_size, 1), dtype=jnp.uint8, device=self.device)),
+                (
+                    batch,
+                    jnp.zeros((batch_size, 1), dtype=jnp.uint8, device=self.device),
+                ),
                 axis=1,
             )
             idx = jnp.arange(batch_size, device=self.device)
             flip_mask = jnp.bitwise_and(idx + start, 1).astype(bool)
             batch = jnp.where(flip_mask[:, None], 1 - batch, batch)
+
+        batch = jnp.mod(batch + self._row_offset, self.num_levels)
         return batch
 
 
@@ -473,3 +511,21 @@ def get_row_batch_of_trivial_mixed_level_oa(
             j += 1
 
     return result
+
+
+def _get_row_offset(
+    rng: Optional[jax.random.PRNGKey],
+    num_cols: int,
+    num_levels: int,
+    device: jax.Device | None = None,
+) -> UInt8[Array, " 1 num_cols"]:
+    if rng is None:
+        return jnp.zeros((1, num_cols), dtype=jnp.uint8, device=device)
+    else:
+        return jax.random.randint(
+            rng,
+            shape=(1, num_cols),
+            minval=0,
+            maxval=num_levels,
+            dtype=jnp.uint8,
+        )
