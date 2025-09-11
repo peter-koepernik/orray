@@ -29,7 +29,7 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
     an orthogonal array remains valid if an arbitrary (e.g. random)
     value is added to each column (modulo num_levels).
     """
-    randomisation_rng: Optional[jax.random.PRNGKey]
+    rng: Optional[jax.random.PRNGKey]
     _row_offset: UInt8[Array, " 1 num_cols"]
 
     def __check_init__(self):
@@ -61,7 +61,7 @@ class OrthogonalArray(eqx.Module, Sequence[UInt8[Array, " num_cols"]]):
 
     @abc.abstractmethod
     def randomise(self, rng: jax.random.PRNGKey) -> "OrthogonalArray":
-        """Return a new module with given randomisation_rng."""
+        """Return a new module with given rng."""
         raise NotImplementedError
 
     @abc.abstractmethod
@@ -262,7 +262,7 @@ class MaterializedOrthogonalArray(OrthogonalArray):
         strength: int,
         orthogonal_array: UInt8[Array, "num_rows num_cols"],
         device: jax.Device | None = None,
-        randomisation_rng: Optional[jax.random.PRNGKey] = None,
+        rng: Optional[jax.random.PRNGKey] = None,
     ):
         self.num_rows, self.num_cols = orthogonal_array.shape
         self.num_levels = num_levels
@@ -283,9 +283,9 @@ class MaterializedOrthogonalArray(OrthogonalArray):
             self._oa = jax.device_put(self._oa, device)
             self.device = device
 
-        self.randomisation_rng = jax.device_put(randomisation_rng, self.device)
+        self.rng = jax.device_put(rng, self.device)
         self._row_offset = _get_row_offset(
-            self.randomisation_rng, self.num_cols, self.num_levels, self.device
+            self.rng, self.num_cols, self.num_levels, self.device
         )
 
     def to_device(self, device: jax.Device) -> "MaterializedOrthogonalArray":
@@ -296,7 +296,7 @@ class MaterializedOrthogonalArray(OrthogonalArray):
             strength=self.strength,
             orthogonal_array=base_oa,
             device=device,
-            randomisation_rng=self.randomisation_rng,
+            rng=self.rng,
         )
 
     def randomise(self, rng: jax.random.PRNGKey) -> "MaterializedOrthogonalArray":
@@ -307,7 +307,7 @@ class MaterializedOrthogonalArray(OrthogonalArray):
             strength=self.strength,
             orthogonal_array=base_oa,
             device=self.device,
-            randomisation_rng=rng,
+            rng=rng,
         )
 
     def _get_batch(
@@ -359,7 +359,7 @@ class LinearOrthogonalArray(OrthogonalArray):
         ]
         | None = None,
         device: jax.Device | None = None,
-        randomisation_rng: Optional[jax.random.PRNGKey] = None,
+        rng: Optional[jax.random.PRNGKey] = None,
     ):
         self.num_levels = num_levels
         self.strength = strength
@@ -403,9 +403,9 @@ class LinearOrthogonalArray(OrthogonalArray):
         if self._even_to_odd:
             self.num_cols += 1
 
-        self.randomisation_rng = jax.device_put(randomisation_rng, self.device)
+        self.rng = jax.device_put(rng, self.device)
         self._row_offset = _get_row_offset(
-            self.randomisation_rng, self.num_cols, self.num_levels, self.device
+            self.rng, self.num_cols, self.num_levels, self.device
         )
 
     def to_device(self, device: jax.Device) -> "LinearOrthogonalArray":
@@ -418,7 +418,7 @@ class LinearOrthogonalArray(OrthogonalArray):
             binary_oa_even_to_odd_strength=self._even_to_odd,
             post_linear_combination_processor=self._post_linear_combination_processor,
             device=device,
-            randomisation_rng=self.randomisation_rng,
+            rng=self.rng,
         )
 
     def randomise(self, rng: jax.random.PRNGKey) -> "LinearOrthogonalArray":
@@ -431,7 +431,7 @@ class LinearOrthogonalArray(OrthogonalArray):
             binary_oa_even_to_odd_strength=self._even_to_odd,
             post_linear_combination_processor=self._post_linear_combination_processor,
             device=self.device,
-            randomisation_rng=rng,
+            rng=rng,
         )
 
     def _get_batch(

@@ -114,7 +114,7 @@ def check_device_placement(
 def check_randomise(oa: OrthogonalArray):
     _oa = oa.materialize()
 
-    original_rng = oa.randomisation_rng
+    original_rng = oa.rng
     if original_rng is not None:
         original_offset = jax.random.randint(
             original_rng, (1, oa.num_cols), 0, oa.num_levels, dtype=jnp.uint8
