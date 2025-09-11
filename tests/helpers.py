@@ -65,7 +65,7 @@ def check_getitem(oa: OrthogonalArray) -> None:
 
 
 def check_jit_compatible(
-    oa: OrthogonalArray, batch_size: int, *, device: jax.Device | None = None
+    oa: OrthogonalArray, batch_size: int
 ) -> None:
     """Assert that `batches(jit_compatible=True)` is jax.jit-compatible with traced indices.
 
@@ -73,7 +73,7 @@ def check_jit_compatible(
     and scans over indices calling `seq[i]` inside a jitted function.
     """
     assert batch_size > 0, "batch_size must be positive"
-    seq = oa.batches(batch_size, jit_compatible=True, device=device)
+    seq = oa.batches(batch_size, jit_compatible=True)
     n = len(seq)
 
     def step(carry, i):
@@ -95,7 +95,8 @@ def check_device_placement(
 
     Checks first and last batches in jit-compatible mode.
     """
-    seq = oa.batches(batch_size, jit_compatible=True, device=device)
+    oa = oa.to_device(device)
+    seq = oa.batches(batch_size, jit_compatible=True)
     b0, m0 = seq[0]
     d0 = _devices_of(b0)
     assert d0 and device in d0, f"First batch not on device {device}; got {d0}"
@@ -157,7 +158,6 @@ def check_exceptions(
             raise AssertionError(f"Expected ValueError for batch_size={bs}")
 
 
-@partial(jax.jit, static_argnames=("n", "k", "batch_size", "sort"))
 def sample_column_indices(
     rng: jax.random.PRNGKey, n: int, k: int, batch_size: int, sort: bool = False
 ) -> Int[Array, "batch_size k"]:
@@ -191,7 +191,6 @@ def sample_column_indices(
     return idx
 
 
-@partial(jax.jit, static_argnames="num_levels")
 def _check_all_rows_appear_equally_often(
     x: UInt8[Array, "batch_size num_rows num_cols"], num_levels: int
 ) -> Bool[Array, "batch_size"]:
@@ -236,7 +235,6 @@ def _check_all_rows_appear_equally_often(
     return ok
 
 
-@partial(jax.jit, static_argnames=["num_levels", "strength"])
 def _set_of_columns_is_valid(
     materialized_orthogonal_array: UInt8[Array, "num_rows num_cols"],
     indices: Int[Array, "batch_size ..."],

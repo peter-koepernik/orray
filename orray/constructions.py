@@ -48,6 +48,7 @@ def construct_oa_bose_ray(m: int, strength: int, device: jax.Device | None = Non
         num_levels=2,
         strength=strength,
         binary_oa_even_to_odd_strength=(strength % 2 == 1),
+        device=device
     )
     if strength % 2 == 1:
         assert oa.shape == (2 ** (m * t + 1), 2**m)
@@ -97,6 +98,7 @@ def construct_oa_vandermonde(
         mod=q,
         num_levels=q,
         strength=strength,
+        device=device
     )
     assert oa.shape == (q ** (m * strength), q**m)
     return oa
@@ -164,6 +166,7 @@ def construct_oa_delsarte_goethals(m: int, device: jax.Device | None = None):
         num_levels=2,
         strength=7,
         post_linear_combination_processor=_gray_map,
+        device=device
     )
     assert oa.shape == (2 ** (3 * (m + 1) - 1), 2 ** (m + 1))
     return oa
@@ -223,6 +226,7 @@ def construct_oa_kerdock(m: int, device: jax.Device | None = None):
         num_levels=2,
         strength=5,
         post_linear_combination_processor=_gray_map,
+        device=device
     )
     assert oa.shape == (4 ** (m + 1), 2 ** (m + 1))
     return oa
@@ -247,6 +251,7 @@ def construct_oa_from_s_wise_linearly_independent_vectors(
         mod=q,
         num_levels=q,
         strength=s,
+        device=device
     )
     assert oa.shape == (q**d, n)
     return oa
@@ -269,6 +274,7 @@ def construct_oa_strength1(
         mod=num_levels,
         num_levels=num_levels,
         strength=1,
+        device=device
     )
     assert oa.shape == (num_levels, num_levels)
     return oa
@@ -299,9 +305,11 @@ def construct_oa_strength2(
         mat = mat.at[0, : q ** (d - 1)].set(1)
 
         if d > 1:
-            mat = mat.at[1:, : q ** (d - 1)].set(
-                construct_trivial_oa(d - 1, q, device=device).materialize().T
-            )
+            submatrix = construct_trivial_oa(d - 1, q, device=device)
+            print(submatrix)
+            submatrix = submatrix.materialize().T
+            mat = mat.at[1:, : q ** (d - 1)].set(submatrix)
+
             mat = mat.at[1:, q ** (d - 1) :].set(fill(mat[1:, q ** (d - 1) :]))
         return mat
 
@@ -553,6 +561,7 @@ def construct_trivial_oa(
         mod=q,
         num_levels=q,
         strength=n_cols,
+        device=device
     )
 
 
