@@ -1,11 +1,10 @@
 [project]
 name = "orray"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python package for efficient instantiation of large orthogonal arrays."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-	"numpy",
 	"galois",
 	"jax",
 	"equinox",

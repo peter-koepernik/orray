@@ -1,9 +1,8 @@
 import abc
 import math
 import operator
-from functools import partial, reduce, cached_property
-from typing import Callable, Collection, Literal, Sequence, overload, Optional
-from dataclasses import replace
+from functools import partial, reduce
+from typing import Callable, Collection, Literal, Optional, Sequence, overload
 
 import equinox as eqx
 import jax

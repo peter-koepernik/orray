@@ -4,22 +4,23 @@ import pytest
 from orray.oa import OrthogonalArray
 
 from .helpers import (
-    check_is_orthogonal,
     check_device_placement,
     check_exceptions,
+    check_getitem,
+    check_is_orthogonal,
     check_jit_compatible,
+    check_randomise,
     check_return_type,
-	check_getitem,
-	check_randomise
 )
 
 
 def test_randomise(oa: OrthogonalArray):
-	check_randomise(oa)
+    check_randomise(oa)
+
 
 def test_is_orthogonal(oa: OrthogonalArray):
-	rng = jax.random.PRNGKey(0)
-	check_is_orthogonal(rng, oa)
+    rng = jax.random.PRNGKey(0)
+    check_is_orthogonal(rng, oa)
 
 
 def test_return_type(oa: OrthogonalArray):
@@ -28,14 +29,13 @@ def test_return_type(oa: OrthogonalArray):
 
 
 def test_jit_compatible(oa: OrthogonalArray):
-	batch_size = min(len(oa), 128)
-	check_jit_compatible(oa, batch_size=batch_size)
+    batch_size = min(len(oa), 128)
+    check_jit_compatible(oa, batch_size=batch_size)
 
 
 def test_device_placement(oa: OrthogonalArray):
     dev = jax.devices()[0]
     check_device_placement(oa, batch_size=2, device=dev)
-
 
 
 def test_batches_invalid_sizes(oa: OrthogonalArray):
@@ -45,8 +45,10 @@ def test_batches_invalid_sizes(oa: OrthogonalArray):
     with pytest.raises(ValueError):
         _ = oa.batches(oa.num_rows + 1)
 
+
 def test_getitem(oa: OrthogonalArray):
-	check_getitem(oa)
+    check_getitem(oa)
+
 
 def test_batches_length_and_last_batch_shape(oa: OrthogonalArray):
     batch_size = 3

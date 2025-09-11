@@ -7,14 +7,11 @@ failure and return None on success. You can call them directly in tests.
 from __future__ import annotations
 
 import math
-import random
 from functools import partial
 
 import jax
 import jax.numpy as jnp
-import numpy as np
-import pytest
-from jaxtyping import Array, Bool, Int32, Int64, UInt8, Int
+from jaxtyping import Array, Bool, Int, UInt8
 
 from orray.oa import OrthogonalArray
 

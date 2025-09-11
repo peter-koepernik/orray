@@ -1,6 +1,5 @@
 import itertools
 import operator
-from functools import reduce
 from typing import Optional
 
 import galois
@@ -13,6 +12,7 @@ from orray.oa import LinearOrthogonalArray, OrthogonalArray
 ##################################################
 #          "Master" Construction Method          #
 ##################################################
+
 
 def construct_oa(
     num_cols: int,
@@ -42,9 +42,7 @@ def construct_oa(
     elif num_cols <= num_levels:
         assert galois.is_prime(num_levels)
         # has exactly num_levels^strength rows, so is now optimal
-        oa = construct_oa_vandermonde(
-            num_levels, 1, strength, device=device, rng=rng
-        )
+        oa = construct_oa_vandermonde(num_levels, 1, strength, device=device, rng=rng)
     elif strength == 2:
         q = num_levels
         assert galois.is_prime(q)
@@ -71,9 +69,7 @@ def construct_oa(
         # is vandermonde construction OA(q^(ms), q^m, q, s)
         m = int(jnp.ceil(jnp.log(num_cols) / jnp.log(num_levels)))
         assert num_levels**m >= num_cols and num_levels ** (m - 1) < num_cols
-        oa = construct_oa_vandermonde(
-            num_levels, m, strength, device=device, rng=rng
-        )
+        oa = construct_oa_vandermonde(num_levels, m, strength, device=device, rng=rng)
     num_rows = len(oa)
 
     # check if trivial array is better (for example if num_cols=4 and strength=5 binary array)
@@ -86,9 +82,11 @@ def construct_oa(
     # TODO test this method rigorously
     return oa
 
+
 ##################################################
 #            Individual Constructions            #
 ##################################################
+
 
 def construct_binary_oa(
     num_cols: int,
@@ -180,7 +178,6 @@ def construct_oa_bose_ray(
     else:
         assert oa.shape == (2 ** (m * t), 2**m - 1)
     return oa
-
 
 
 def construct_oa_delsarte_goethals(
@@ -350,6 +347,7 @@ def construct_oa_from_s_wise_linearly_independent_vectors(
     assert oa.shape == (q**d, n)
     return oa
 
+
 def construct_oa_vandermonde(
     q: int,
     m: int,
@@ -400,7 +398,6 @@ def construct_oa_vandermonde(
     )
     assert oa.shape == (q ** (m * strength), q**m)
     return oa
-
 
 
 def construct_oa_strength1(
@@ -489,9 +486,7 @@ def construct_oa_strength3(
         assert (
             num_levels ** (2 * m) >= num_cols and num_levels ** (2 * (m - 1)) < num_cols
         )
-        return construct_oa_strength3_base3(
-            m, num_levels, device=device, rng=rng
-        )
+        return construct_oa_strength3_base3(m, num_levels, device=device, rng=rng)
 
     # strength 3, and 3 num_levels -> cap set constructions
     # base 3: OA(3^(3m+1),  9^m, 3, 3)
@@ -502,18 +497,12 @@ def construct_oa_strength3(
     m_base5 = int(jnp.ceil(jnp.log(num_cols) / jnp.log(45)))
     if 3 * m_base3 < 4 * m_base4 and 3 * m_base3 < 5 * m_base5:
         # base 3 has smallest number of rows
-        return construct_oa_strength3_base3(
-            m_base3, 3, device=device, rng=rng
-        )
+        return construct_oa_strength3_base3(m_base3, 3, device=device, rng=rng)
     elif 4 * m_base4 < 5 * m_base5:
         # base 4 has smallest number of rows
-        return construct_oa_q3_strength3_base4(
-            m_base4, device=device, rng=rng
-        )
+        return construct_oa_q3_strength3_base4(m_base4, device=device, rng=rng)
     # base 5 has smallest number of rows
-    return construct_oa_q3_strength3_base5(
-        m_base5, device=device, rng=rng
-    )
+    return construct_oa_q3_strength3_base5(m_base5, device=device, rng=rng)
 
 
 def construct_oa_strength3_base3(
@@ -528,9 +517,7 @@ def construct_oa_strength3_base3(
     assert m >= 1
     cap_set = _construct_cap_set(q, m, device=device)
     assert device is None or cap_set.device == device
-    oa = construct_oa_from_generalised_cap_set(
-        cap_set, q, s=3, device=device, rng=rng
-    )
+    oa = construct_oa_from_generalised_cap_set(cap_set, q, s=3, device=device, rng=rng)
     # assert oa.runs == q ** (3 * m + 1)
     assert oa.shape == (q ** (3 * m + 1), q ** (2 * m))
     return oa
@@ -820,7 +807,6 @@ def construct_oa_q3_strength4(
     )
     assert oa.shape == (3 ** (2 * m + 1), 3**m)
     return oa
-
 
 
 ###################################################
