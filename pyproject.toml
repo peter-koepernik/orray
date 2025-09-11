@@ -4,6 +4,30 @@ version = "0.1.0"
 description = "Python package for efficient instantiation of large orthogonal arrays."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+	{ email = "peter@koepernik.net", name = "Peter Koepernik" },
+	{ email = "t.coxon2@lboro.ac.uk", name = "Thomas Coxon" }
+]
+keywords = ["orthogonal-arrays", "combinatorics", "jax", "orray"]
+classifiers = [
+	"Development Status :: 3 - Alpha",
+	"Intended Audience :: Developers",
+	"Intended Audience :: Financial and Insurance Industry",
+	"Intended Audience :: Information Technology",
+	"Intended Audience :: Science/Research",
+	"Topic :: Scientific/Engineering :: Mathematics",
+	"Topic :: Scientific/Engineering :: Information Analysis",
+	"License :: OSI Approved :: Apache Software License",
+	"Natural Language :: English",
+	"Programming Language :: Python :: 3",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+]
+urls = {repository = "https://github.com/peter-koepernik/orray"}
+
 dependencies = [
 	"galois",
 	"jax",
@@ -15,3 +39,7 @@ dependencies = [
 dev = [
     "pytest>=8.4.2",
 ]
+
+[build-system]
+build-backend = "hatchling.build"
+requires = ["hatchling"]
