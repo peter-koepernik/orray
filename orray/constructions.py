@@ -5,7 +5,7 @@ from functools import reduce
 import galois
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, Int32
+from jaxtyping import Array, UInt8
 
 from orray.oa import LinearOrthogonalArray
 
@@ -80,16 +80,16 @@ def construct_oa_vandermonde(
         )
         galois_vector = itertools.accumulate(repeated_x, operator.mul)
         return jax.device_put(
-            jnp.concatenate([y.vector() for y in galois_vector], dtype=jnp.int32),
+            jnp.concatenate([y.vector() for y in galois_vector], dtype=jnp.uint8),
             device=device,
         )
 
     columns = [
-        jnp.asarray([1] + (m * strength - 1) * [0], dtype=jnp.int32, device=device)
+        jnp.asarray([1] + (m * strength - 1) * [0], dtype=jnp.uint8, device=device)
     ] + [get_vector_from_galois_element(x) for x in galois_field.units]
     # now M is a (m*s, q^m) matrix over F_q whose columns are s-wise linearly
     # independent over F_q
-    M = jnp.asarray(jnp.column_stack(columns), dtype=jnp.int32, device=device)
+    M = jnp.asarray(jnp.column_stack(columns), dtype=jnp.uint8, device=device)
     assert device is None or M.device == device
     oa = LinearOrthogonalArray(
         generator_matrix=M,
@@ -147,11 +147,11 @@ def construct_oa_delsarte_goethals(m: int, device: jax.Device | None = None):
     xi_table = _calculate_xi_table(m, 3 * (n - 1), device=device)
     # the generator of the DG code is made up of three vertically stacked blocks of
     # respective lengths 1, m, m
-    first_block = jnp.ones((1, n + 1), dtype=jnp.int32, device=device)
+    first_block = jnp.ones((1, n + 1), dtype=jnp.uint8, device=device)
     second_block = xi_table[: n + 1, :].T
     powers = list(range(3, 3 * n, 3))  # e.g. third power of xi has index 4 in xi_table
     indices = jnp.asarray(
-        [0, 1] + [1 + i for i in powers], dtype=jnp.int32, device=device
+        [0, 1] + [1 + i for i in powers], dtype=jnp.uint8, device=device
     )
     third_block = 2 * xi_table[indices, :].T
     # (2m+1) x 2^m, the generator of the Delsarte-Goethals code
@@ -212,7 +212,7 @@ def construct_oa_kerdock(m: int, device: jax.Device | None = None):
     assert m >= 4
     m -= 1  # make m consistent with the literature: >= 3 and odd
     xi_table = _calculate_xi_table(m, device=device)
-    ones_column = jnp.ones((2**m, 1), dtype=jnp.int32, device=device)
+    ones_column = jnp.ones((2**m, 1), dtype=jnp.uint8, device=device)
     # (m+1) x 2^m, generator of the kerdock code
     G = jnp.hstack((ones_column, xi_table)).T
     assert device is None or G.device == device
@@ -229,7 +229,7 @@ def construct_oa_kerdock(m: int, device: jax.Device | None = None):
 
 
 def construct_oa_from_s_wise_linearly_independent_vectors(
-    vecs: Int32[Array, "d n"], q: int, s: int, device: jax.Device | None = None
+    vecs: UInt8[Array, "d n"], q: int, s: int, device: jax.Device | None = None
 ) -> LinearOrthogonalArray:
     """
     Takes a matrix of shape say (d, n) such that its columns are s-wise linearly
@@ -242,7 +242,7 @@ def construct_oa_from_s_wise_linearly_independent_vectors(
     d, n = vecs.shape
     assert q >= 2
     oa = LinearOrthogonalArray(
-        generator_matrix=jax.device_put(vecs.astype(jnp.int32), device=device),
+        generator_matrix=jax.device_put(vecs.astype(jnp.uint8), device=device),
         arities=[(d, q)],
         mod=q,
         num_levels=q,
@@ -264,7 +264,7 @@ def construct_oa_strength1(
     where l = num_levels
     """
     oa = LinearOrthogonalArray(
-        generator_matrix=jnp.ones((1, num_levels), dtype=jnp.int32, device=device),
+        generator_matrix=jnp.ones((1, num_levels), dtype=jnp.uint8, device=device),
         arities=[(1, num_levels)],
         mod=num_levels,
         num_levels=num_levels,
@@ -290,7 +290,7 @@ def construct_oa_strength2(
     k = (N - 1) // (q - 1)
     # the columns will be all m-element vectors over F_q whose first non-zero entry is 1
     two_wise_linearly_independent_vectors = jnp.zeros(
-        (m, k), dtype=jnp.int32, device=device
+        (m, k), dtype=jnp.uint8, device=device
     )
 
     def fill(mat):
@@ -396,7 +396,7 @@ def construct_oa_q3_strength3_base4(
             [1, 1, 1, 2],
             [2, 2, 1, 2],
         ],
-        dtype=jnp.int32,
+        dtype=jnp.uint8,
         device=device,
     ).T
     # this is a cap set of size 20 in AG(4,3) (the largest possible)
@@ -509,10 +509,10 @@ def construct_oa_q3_strength3_base5(
             [0, 2, 0, 1, 2, 1],
             [2, 2, 1, 2, 0, 1],
         ],
-        dtype=jnp.int32,
+        dtype=jnp.uint8,
         device=device,
     )
-    nonzeros_by_column = jnp.sum((K != 0).astype(jnp.int32), axis=0)
+    nonzeros_by_column = jnp.sum((K != 0).astype(jnp.uint8), axis=0)
     assert device is None or nonzeros_by_column.device == device
     # one of the columns has exactly 45 non-zero elements; if we discard zero-rows, and
     # normalise the remaining entries to 1 in this column (we are in projective geometry
@@ -548,7 +548,7 @@ def construct_trivial_oa(
 ) -> LinearOrthogonalArray:
     """returns the trivial OA with q^n_cols rows"""
     return LinearOrthogonalArray(
-        generator_matrix=jnp.eye(n_cols, dtype=jnp.int32, device=device),
+        generator_matrix=jnp.eye(n_cols, dtype=jnp.uint8, device=device),
         arities=[(n_cols, q)],
         mod=q,
         num_levels=q,
@@ -557,7 +557,7 @@ def construct_trivial_oa(
 
 
 def construct_oa_from_generalised_cap_set(
-    cap_set: Int32[Array, "d k"], q: int, s: int, device: jax.Device | None = None
+    cap_set: UInt8[Array, "d k"], q: int, s: int, device: jax.Device | None = None
 ) -> LinearOrthogonalArray:
     """Takes a set of k, d-dimensional vectors in F_q (q prime), and returns a matrix
     which, assuming the given vectors are s-wise affinely independent
@@ -571,7 +571,7 @@ def construct_oa_from_generalised_cap_set(
     # turn s-wise affinely independent vectors into s-wise linearly independent vectors
     # by adding a coordinate that is equal to 1 for every vector
     s_wise_linearly_independent_vectors = jnp.vstack(
-        (jnp.ones((1, k), dtype=jnp.int32, device=device), cap_set)
+        (jnp.ones((1, k), dtype=jnp.uint8, device=device), cap_set)
     )
 
     oa = construct_oa_from_s_wise_linearly_independent_vectors(
@@ -605,52 +605,19 @@ def construct_oa_q3_strength4(
     # generate a 4-wise affinely independent set of size 3^n in AG(2n, 3)
     gf = galois.GF(3**m)
     N = 3**m
-    cap_set = jnp.zeros((N, 2 * m), dtype=jnp.int32, device=device)
+    cap_set = jnp.zeros((N, 2 * m), dtype=jnp.uint8, device=device)
     for x in range(3**m):
         x_gf = gf(x)
         cap_set = cap_set.at[x, :m].set(
-            jnp.asarray(x_gf.vector(), dtype=jnp.int32, device=device)
+            jnp.asarray(x_gf.vector(), dtype=jnp.uint8, device=device)
         )
         cap_set = cap_set.at[x, m:].set(
-            jnp.asarray((x_gf * x_gf).vector(), dtype=jnp.int32, device=device)
+            jnp.asarray((x_gf * x_gf).vector(), dtype=jnp.uint8, device=device)
         )
     oa = construct_oa_from_generalised_cap_set(cap_set.T, q=3, s=4, device=device)
     assert oa.shape == (3 ** (2 * m + 1), 3**m)
     return oa
 
-
-def get_row_batch_of_trivial_mixed_level_oa(
-    i0: Int32[Array, ""],
-    arities: tuple[tuple[int, int], ...],
-    batch_size: int,
-    device: jax.Device | None = None,
-) -> Int32[Array, "batch_size num_cols"]:
-    n_cols = sum(n for (n, _) in arities)
-    n_rows = reduce(operator.mul, [pow(q, n) for (n, q) in arities])
-    result = jnp.zeros((batch_size, n_cols), dtype=jnp.int32, device=device)
-
-    indices = i0 + jnp.arange(batch_size, device=device)
-
-    j = jnp.asarray(0)  # col index
-    period = n_rows
-    for n, q in arities:
-        if q == 2:
-            ints = i0 + jnp.arange(batch_size, device=device)
-            bits = jnp.arange(n, device=device)
-            _update = jnp.bitwise_and(jnp.right_shift(ints[:, None], bits[None, :]), 1)
-            update = _update.astype(jnp.int32)
-            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
-            j += n
-            continue
-
-        for _ in range(n):
-            period = period // q
-            update = jnp.astype(indices // period, jnp.int32)[..., None]
-            result = jax.lax.dynamic_update_slice_in_dim(result, update, j, axis=1)
-            indices = indices % period
-            j += 1
-
-    return result
 
 
 ###################################################
@@ -660,7 +627,7 @@ def get_row_batch_of_trivial_mixed_level_oa(
 
 def _generate_2t_wise_linearly_independent_vectors(
     m: int, t: int, device: jax.Device | None = None
-) -> Int32[Array, "m*t ..."]:
+) -> UInt8[Array, "m*t ..."]:
     """Returns a set of 2^m-1 vectors in F_2^{mt} such that any set of 2t of
     them are linearly independent (i.e. a 2t-Sidon set in F_2^{mt}). Returns the result
     as a 0-1 matrix of shape (mt) x 2^m-1."""
@@ -668,7 +635,7 @@ def _generate_2t_wise_linearly_independent_vectors(
     assert m >= 1
     assert t >= 1
 
-    def get_mt_vector(_m: ...) -> Int32[Array, " mt"]:
+    def get_mt_vector(_m: ...) -> UInt8[Array, " mt"]:
         """Given a vector alpha in F_2^m, returns the vector (alpha, alpha^3, ...,
         alpha^(2t-1)) in F_2^(mt), where multiplication in F_2^m is defined through the
         identification of F_2^m with the Galois group GF(2^m)."""
@@ -676,14 +643,14 @@ def _generate_2t_wise_linearly_independent_vectors(
         mt_sequence = itertools.accumulate(repeated_m_vector, operator.mul)
         return jnp.concatenate(
             [
-                jnp.asarray(mt.vector(), dtype=jnp.int32, device=device)
+                jnp.asarray(mt.vector(), dtype=jnp.uint8, device=device)
                 for mt in mt_sequence
             ]
         )
 
     mt_vector_generator = (get_mt_vector(m) for m in galois_field.units)
     return jnp.asarray(
-        jnp.column_stack(list(mt_vector_generator)), dtype=jnp.int32, device=device
+        jnp.column_stack(list(mt_vector_generator)), dtype=jnp.uint8, device=device
     )
 
 
@@ -743,7 +710,7 @@ def _calculate_xi_table(
     )  # delete leading one, reverse order, take minus modulo 4
     assert feedback[0] == 1
     offset = int(include_zero_row)
-    table = jnp.zeros((offset + 1 + max_power_of_xi, m), dtype=jnp.int32, device=device)
+    table = jnp.zeros((offset + 1 + max_power_of_xi, m), dtype=jnp.uint8, device=device)
 
     # === jax version of: ===
     # table[offset, 0] = 1
@@ -756,7 +723,7 @@ def _calculate_xi_table(
 
     def body_fun(i, table):
         prev_row = table[i - 1]
-        new_row = jnp.zeros(m, dtype=jnp.int32, device=device)
+        new_row = jnp.zeros(m, dtype=jnp.uint8, device=device)
         new_row = new_row.at[1:].set(prev_row[:-1])  # shift right
         new_row = jnp.mod(new_row + prev_row[-1] * feedback, 4)
         return table.at[i].set(new_row)
@@ -767,8 +734,8 @@ def _calculate_xi_table(
 
 
 def _gray_map(
-    orthogonal_array: Int32[Array, "runs factors"],
-) -> Int32[Array, "runs factors"]:
+    orthogonal_array: UInt8[Array, "runs factors"],
+) -> UInt8[Array, "runs factors"]:
     """maps a 4-ary integer array of some shape (n1, n2) to a 2-ary integer array of
     shape (n1, 2*n2) through an element-wise application of the *Gray map*:
 
@@ -784,7 +751,7 @@ def _gray_map(
     orthogonal_array_1 = orthogonal_array >= 2
     orthogonal_array_2 = jnp.logical_and(orthogonal_array >= 1, orthogonal_array <= 2)
     _orthogonal_array = jnp.hstack((orthogonal_array_1, orthogonal_array_2))
-    return _orthogonal_array.astype(jnp.int32)
+    return _orthogonal_array.astype(jnp.uint8)
 
 
 def _get_h_polynomial(m: int, device: jax.Device | None = None):
@@ -816,7 +783,7 @@ def _get_h_polynomial(m: int, device: jax.Device | None = None):
 
 
 def _get_h_polynomial_from_primitive_F2(
-    primitive: Int32[Array, " n"], device: jax.Device | None = None
+    primitive: UInt8[Array, " n"], device: jax.Device | None = None
 ):
     """Takes a primitive polynomial over F_2 of some odd degree m and turns it into a
     monic primitive basic irreducible polynomial over Z_4, using Graeffe's method.
@@ -835,7 +802,7 @@ def _get_h_polynomial_from_primitive_F2(
     }
     ```
     """
-    primitive = jnp.asarray(primitive, dtype=jnp.int32, device=device)
+    primitive = jnp.asarray(primitive, dtype=jnp.uint8, device=device)
     assert jnp.all(primitive >= 0) and jnp.all(primitive <= 1)
     assert len(primitive.shape) == 1
     m = len(primitive) - 1
@@ -849,7 +816,7 @@ def _get_h_polynomial_from_primitive_F2(
     assert len(d_sq) == 2 * m + 1
     e_sq = jnp.pad(e_sq, (2 * m + 1 - len(e_sq), 0), constant_values=0)
     # now h(x^2) = (+ or -) e(x)^2 - d(x)^2
-    h_of_x_sq = jnp.mod(e_sq - d_sq, 4).astype(jnp.int32)
+    h_of_x_sq = jnp.mod(e_sq - d_sq, 4).astype(jnp.uint8)
     assert jnp.all(h_of_x_sq[1::2] == 0)
     h = h_of_x_sq[::2]
     if h[0] == 3:  # i.e. h[0] = -1 in Z_4
@@ -887,14 +854,14 @@ def _construct_cap_set(q: int, m: int, device: jax.Device | None = None):
     assert m >= 1
     f = jnp.asarray(
         galois.primitive_poly(q, degree=2).coefficients(),
-        dtype=jnp.int32,
+        dtype=jnp.uint8,
         device=device,
     )
     if f[1] == 0:
         # make sure the term for x is non-zero
         f = jnp.asarray(
             galois.primitive_poly(q, degree=2, terms=3).coefficients(),
-            dtype=jnp.int32,
+            dtype=jnp.uint8,
             device=device,
         )
     if f[1] != 1:
@@ -919,13 +886,13 @@ def _construct_cap_set(q: int, m: int, device: jax.Device | None = None):
     return cap_set
 
 
-def repeat_vectors(vecs: Int32[Array, "d k"], z: int):
+def repeat_vectors(vecs: UInt8[Array, "d k"], z: int):
     """Takes a set of k, d-dimensional vectors (as columns), and returns the set of k^z,
     (dz)-dimensional vectors that can be obtained through all possible combinations of
     concatenating z of the k vectors (including repetitions of the same vector)."""
     d, k = vecs.shape
     device = vecs.device
-    output = jnp.zeros((d * z, k**z), dtype=jnp.int32, device=device)
+    output = jnp.zeros((d * z, k**z), dtype=jnp.uint8, device=device)
 
     def fill(M, j):
         assert M.shape == (d * j, k**j)

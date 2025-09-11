@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
-from jaxtyping import Array, Bool, Int32, Int64
+from jaxtyping import Array, Bool, Int32, Int64, UInt8, Int
 
 from orray.oa import OrthogonalArray
 
@@ -51,9 +51,17 @@ def _devices_of(x) -> tuple[jax.Device, ...] | tuple[()]:
 
 
 def check_getitem(oa: OrthogonalArray) -> None:
-    materialized_array = oa.materialize()
-    materialized_array_from_getitem = jnp.vstack([oa[i] for i in range(oa.num_rows)])
-    assert jnp.allclose(materialized_array, materialized_array_from_getitem)
+    stop = min(1005, len(oa))
+    start = max(0, min(3, stop - 2))
+
+    assert stop - start > 0, f"need start < stop but {start} >= {stop}"
+
+    from_slice = oa[start:stop]
+    from_rows = jnp.vstack([oa[i] for i in range(start, stop)])
+
+    assert from_slice.shape == (stop-start, oa.factors), f"oa[{start}:{stop}].shape = {from_slice.shape} != {(stop-start, oa.factors)}"
+    assert from_rows.shape == (stop-start, oa.factors)
+    assert jnp.allclose(from_slice, from_rows)
 
 
 def check_jit_compatible(
@@ -113,7 +121,7 @@ def check_return_type(
         seq = oa.batches(batch_size)
         x0 = seq[0]
         assert hasattr(x0, "dtype"), "Item is not an array-like with dtype"
-        assert x0.dtype == jnp.int32, f"Expected dtype int32, got {x0.dtype}"
+        assert x0.dtype == jnp.uint8, f"Expected dtype uint8, got {x0.dtype}"
         assert x0.shape == (batch_size, oa.num_cols), (
             f"Expected shape {(batch_size, oa.num_cols)}, got {x0.shape}"
         )
@@ -121,7 +129,7 @@ def check_return_type(
         seq = oa.batches(batch_size, jit_compatible=True)
         x0, m0 = seq[0]
         assert hasattr(x0, "dtype"), "Batch is not an array-like with dtype"
-        assert x0.dtype == jnp.int32, f"Expected dtype int32, got {x0.dtype}"
+        assert x0.dtype == jnp.uint8, f"Expected dtype uint8, got {x0.dtype}"
         assert x0.shape == (batch_size, oa.num_cols), (
             f"Expected shape {(batch_size, oa.num_cols)}, got {x0.shape}"
         )
@@ -152,7 +160,7 @@ def check_exceptions(
 @partial(jax.jit, static_argnames=("n", "k", "batch_size", "sort"))
 def sample_column_indices(
     rng: jax.random.PRNGKey, n: int, k: int, batch_size: int, sort: bool = False
-) -> Int32[Array, "batch_size k"]:
+) -> Int[Array, "batch_size k"]:
     """
     Returns an integer array of shape (batch_size, k). Each row is a uniformly random
     k-subset of {0, ..., n-1}, sampled without replacement and optionally sorted ascending.
@@ -165,7 +173,7 @@ def sample_column_indices(
         sort: whether to sort the rows
 
     Returns:
-        (batch_size, k) int32 array with rows i1 < ... < ik, values in {0, ..., n-1}.
+        (batch_size, k) integer array with rows i1 < ... < ik, values in {0, ..., n-1}.
     """
     # Basic argument checks (executed at trace time since they are Python ints).
     if not (1 <= k <= n):
@@ -179,12 +187,13 @@ def sample_column_indices(
     _, idx = jax.lax.top_k(g, k)  # (batch_size, k), indices in descending Gumbel order
     if sort:
         idx = jnp.sort(idx, axis=1)  # sort to enforce i1 < ... < ik
-    return idx.astype(jnp.int32)
+    assert idx.dtype == jnp.int32, f"actual dtype {idx.dtype}"
+    return idx
 
 
 @partial(jax.jit, static_argnames="num_levels")
 def _check_all_rows_appear_equally_often(
-    x: Int64[Array, "batch_size num_rows num_cols"], num_levels: int
+    x: UInt8[Array, "batch_size num_rows num_cols"], num_levels: int
 ) -> Bool[Array, "batch_size"]:
     """
     x: int array of shape (batch_size, num_rows, num_columns) with entries in {0,...,num_levels-1}
@@ -229,8 +238,8 @@ def _check_all_rows_appear_equally_often(
 
 @partial(jax.jit, static_argnames=["num_levels", "strength"])
 def _set_of_columns_is_valid(
-    materialized_orthogonal_array: Int32[Array, "num_rows num_cols"],
-    indices: Int32[Array, "batch_size ..."],
+    materialized_orthogonal_array: UInt8[Array, "num_rows num_cols"],
+    indices: Int[Array, "batch_size ..."],
     num_levels: int,
     strength: int,
 ):
@@ -300,7 +309,8 @@ def check_is_orthogonal(
     _oa, ok = _is_orthogonal(rng, orthogonal_array, confidence, epsilon)
 
     num_levels = orthogonal_array.num_levels
-    assert jnp.all(_oa >= 0)
+    # automatic, since it's uint8
+    # assert jnp.all(_oa >= 0)
     assert jnp.all(_oa < num_levels)
 
     assert jnp.all(ok)

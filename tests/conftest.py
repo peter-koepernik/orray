@@ -23,7 +23,7 @@ orthogonal_arrays = {
     "strength2(m=3, l=5)": constructions.construct_oa_strength2(m=3, q=5, device=device),
     "strength3_base3(m=2, l=3)": constructions.construct_oa_strength3_base3(m=2, q=3, device=device),
     "strength3_q3_base4(m=2)": constructions.construct_oa_q3_strength3_base4(m=2, device=device),
-    "strength3_q3_base5(m=1)": constructions.construct_oa_q3_strength3_base5(m=1, device=device),
+    "strength3_q3_base5(m=2)": constructions.construct_oa_q3_strength3_base5(m=2, device=device),
     "strength4_q3(m=3)": constructions.construct_oa_q3_strength4(m=3, device=device),
     "trivial(cols=3, l=3)": constructions.construct_trivial_oa(n_cols=5, q=3, device=device),
 }
